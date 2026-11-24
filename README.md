@@ -54,14 +54,13 @@ repository or adding the Codex review caller to one.
 
 | Setting | Where |
 | --- | --- |
-| Squash merging only; commit message is the PR title and description; merged branches are deleted | Repository settings, every non-archived non-fork repository |
-| Default branch changes only through squash-merged pull requests | Organization ruleset `Squash only` (`rulesets/squash-only.json`) |
-| Default branch requires `Codex Code Review` | Organization ruleset `Codex review` (`rulesets/codex-review.json`), limited to repositories that call the reviewer |
+| Squash merging only; commit message is the PR title and description; merged branches are deleted | Repository settings, every non-archived repository |
+| Workflows from outside collaborators' PRs need approval | Repository Actions settings, public repositories |
+| Default branch requires `Codex Code Review`; administrators can bypass | Branch protection, public non-fork repositories that call the reviewer (private repositories need a paid plan) |
+| The same, organization-wide | Organization rulesets in `rulesets/`, applied only on a paid plan |
 
-Organization administrators can bypass both rulesets. Organization rulesets
-need a paid plan; on the free plan the script skips them. Repository-specific
-checks, such as a build, stay in each repository's branch protection or
-repository ruleset.
+Repository-specific checks, such as a build, stay in each repository's branch
+protection; the script keeps them when it adds `Codex Code Review`.
 
 ## Commands
 
