@@ -36,7 +36,6 @@ jobs:
       pull-requests: write
     uses: ./.github/workflows/pr-check-start.yml
     with:
-      runner: ${{ fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' }}
       check-name: Tests
       command: /test
       pull_request_number: ${{ inputs.pull_request_number }}
@@ -73,7 +72,6 @@ jobs:
       pull-requests: write
     uses: ./.github/workflows/pr-check-finish.yml
     with:
-      runner: ${{ fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' }}
       check_run_id: ${{ needs.start.outputs.check_run_id }}
       comment_id: ${{ needs.start.outputs.comment_id }}
       result: ${{ needs.test.result }}
