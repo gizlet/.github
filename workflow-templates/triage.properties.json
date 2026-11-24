@@ -1,0 +1,5 @@
+{
+  "name": "Gizlet PR triage",
+  "description": "Starts CI and Codex review automatically for pull requests from branches in this repository.",
+  "categories": ["Automation"]
+}

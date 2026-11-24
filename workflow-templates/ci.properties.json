@@ -1,0 +1,5 @@
+{
+  "name": "Gizlet gated CI",
+  "description": "Build and test gated by triage or /test; reports the CI check on the pull-request head.",
+  "categories": ["Automation"]
+}

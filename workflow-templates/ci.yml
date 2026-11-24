@@ -1,0 +1,84 @@
+name: CI
+
+# Pull requests reach this workflow through triage.yml or a writer's `/test`
+# comment. Both run this file from the default branch and report the `CI` check
+# on the pull-request head. Do not add a pull_request trigger: the pull request
+# could then rewrite its own required check.
+
+on:
+  push:
+    branches: [$default-branch]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Pull request to test; leave empty to test the selected branch.
+        required: false
+        default: ''
+        type: string
+      head_sha:
+        description: Expected pull-request head, set by automatic triggers.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  start:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '')
+      || (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '/test'))
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: write
+    uses: gizlet/github-workflows/.github/workflows/pr-check-start.yml@latest
+    with:
+      check-name: CI
+      command: /test
+      pull_request_number: ${{ inputs.pull_request_number }}
+      head_sha: ${{ inputs.head_sha }}
+
+  build:
+    name: Build and test
+    needs: start
+    if: >-
+      !cancelled() && (
+        needs.start.outputs.run == 'true'
+        || (needs.start.result == 'skipped' && github.event_name != 'issue_comment'))
+    # Set the BUILD_RUNNER repository variable to use a self-hosted runner.
+    runs-on: ${{ vars.BUILD_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    # The job runs pull-request code: read-only token and no secrets.
+    permissions:
+      contents: read
+    concurrency:
+      group: ci-${{ needs.start.outputs.number || github.ref }}
+      cancel-in-progress: ${{ needs.start.outputs.number != '' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.start.outputs.head_sha || github.sha }}
+          persist-credentials: false
+
+      # Fails until replaced so a required CI check never passes untested.
+      - name: Build and test
+        run: |
+          echo "::error title=CI not configured::Replace this step in .github/workflows/ci.yml with the repository's build and test commands."
+          exit 1
+
+  finish:
+    needs: [start, build]
+    if: always() && needs.start.outputs.run == 'true'
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: write
+    uses: gizlet/github-workflows/.github/workflows/pr-check-finish.yml@latest
+    with:
+      check_run_id: ${{ needs.start.outputs.check_run_id }}
+      comment_id: ${{ needs.start.outputs.comment_id }}
+      result: ${{ needs.build.result }}
