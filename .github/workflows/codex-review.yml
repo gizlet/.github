@@ -240,6 +240,10 @@ jobs:
           codex-home: ${{ runner.temp }}/codex-home
           permission-profile: ':read-only'
           safety-strategy: drop-sudo
+          # Automatic reviews are dispatched by triage with GITHUB_TOKEN, so the
+          # actor is github-actions[bot]. The resolve job has already checked
+          # the requester; let only that bot skip the action's write-access check.
+          allow-bots: true
 
       - name: Publish the review and complete the check
         id: publish
