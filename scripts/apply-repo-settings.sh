@@ -7,7 +7,8 @@
 # review caller to one. Archived repositories are skipped.
 #
 # Every repository: squash merging only, squash commits use the pull-request
-# title and description, and merged branches are deleted.
+# title and description, auto-merge ("Merge when ready") is allowed, and merged
+# branches are deleted.
 #
 # Public repositories: workflows from outside collaborators' pull requests
 # need approval. If the default branch has a workflow calling the shared Codex
@@ -105,11 +106,11 @@ while IFS=$'\t' read -r repo visibility fork; do
   branch=$(gh api "repos/$ORG/$repo" --jq .default_branch)
   echo "$ORG/$repo ($visibility, $branch$([ "$fork" = true ] && echo ", fork"))"
 
-  echo "  squash only, title + description, delete merged branches"
+  echo "  squash only, title + description, allow auto-merge, delete merged branches"
   gh_write api -X PATCH "repos/$ORG/$repo" \
     -F allow_squash_merge=true -F allow_merge_commit=false -F allow_rebase_merge=false \
     -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY \
-    -F delete_branch_on_merge=true
+    -F allow_auto_merge=true -F delete_branch_on_merge=true
 
   [ "$visibility" = PUBLIC ] || continue
   echo "  require approval for all outside collaborators' workflows"
