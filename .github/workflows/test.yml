@@ -60,6 +60,10 @@ jobs:
         with:
           ref: ${{ needs.start.outputs.head_sha || github.sha }}
           persist-credentials: false
+      # Self-hosted runner images may not ship Node.js.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
       - name: Workflow script tests
         run: node --test .github/scripts/pr-command/test.mjs .github/scripts/codex-review/test.mjs
 

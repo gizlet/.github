@@ -15,6 +15,11 @@ on:
         description: Slash command that requests the job, such as /test.
         required: true
         type: string
+      runner:
+        description: Deprecated and ignored; the job always runs on a GitHub-hosted runner.
+        required: false
+        default: ubuntu-latest
+        type: string
       allow-forks:
         description: Also accept pull requests from forks. Keep false for jobs that execute pull-request code.
         required: false
