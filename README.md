@@ -39,13 +39,39 @@ templates:
    pull request that adds them cannot run them.
 4. In branch protection, require `Codex Code Review` and `CI` (source: GitHub
    Actions).
-5. The `BUILD_RUNNER` organization variable names the self-hosted runner
-   (ARC scale set) for the build, start and finish jobs; without it they use
-   `ubuntu-latest`. `scripts/apply-repo-settings.sh` requires approval for
-   all outside collaborators on public repositories. Triage and review always run on
-   GitHub-hosted runners.
+5. Merge to the default branch; jobs run on the runners in the `RUNNERS`
+   organization variable (see below).
 
 The `OPENAI_API_KEY` organization secret is available to every repository.
+
+## Runners
+
+Only triage and Codex review run on GitHub-hosted runners. Every build, test,
+package and release job runs on the self-hosted runner that the `RUNNERS`
+organization variable names for its platform. `RUNNERS` is a JSON object whose
+values are `runs-on` strings, normally ARC scale set names:
+
+```json
+{
+  "default": "...",
+  "linux-x64": "...",
+  "linux-arm64": "...",
+  "macos-x64": "...",
+  "macos-arm64": "...",
+  "windows-x64": "...",
+  "windows-arm64": "..."
+}
+```
+
+`default` runs platform-independent jobs such as check start/finish, version
+checks and publishing. A job looks its runner up with
+`fromJSON(vars.RUNNERS || '{}')['<key>'] || '<github-hosted label>'`, so a
+missing key falls back to the matching GitHub-hosted runner until that
+platform's self-hosted runner exists.
+
+Self-hosted runners must be in a runner group that allows public
+repositories. Every public repository requires approval for workflows from
+outside collaborators, and gated workflows never build fork pull requests.
 
 ## Organization defaults
 

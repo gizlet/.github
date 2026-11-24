@@ -15,7 +15,7 @@ on:
         default: ''
         type: string
       runner:
-        description: Runner for this job. Callers pass the self-hosted build runner so only triage and Codex review use GitHub-hosted runners.
+        description: Runner for this job. Callers pass fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' so only triage and Codex review use GitHub-hosted runners.
         required: false
         default: ubuntu-latest
         type: string
