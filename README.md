@@ -46,6 +46,23 @@ templates:
 
 The `OPENAI_API_KEY` organization secret is available to every repository.
 
+## Organization defaults
+
+`scripts/apply-repo-settings.sh` applies the pull-request defaults. It is
+idempotent; run it with `--dry-run` first, and again after creating a
+repository or adding the Codex review caller to one.
+
+| Setting | Where |
+| --- | --- |
+| Squash merging only; commit message is the PR title and description; merged branches are deleted | Repository settings, every non-archived non-fork repository |
+| Default branch changes only through squash-merged pull requests | Organization ruleset `Squash only` (`rulesets/squash-only.json`) |
+| Default branch requires `Codex Code Review` | Organization ruleset `Codex review` (`rulesets/codex-review.json`), limited to repositories that call the reviewer |
+
+Organization administrators can bypass both rulesets. Organization rulesets
+need a paid plan; on the free plan the script skips them. Repository-specific
+checks, such as a build, stay in each repository's branch protection or
+repository ruleset.
+
 ## Commands
 
 Post a new PR comment that starts a line with the command (not quoted and not
