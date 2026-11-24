@@ -1,0 +1,288 @@
+name: Codex code review
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: Codex model used for the review.
+        required: false
+        default: gpt-6.1-sol
+        type: string
+      effort:
+        description: Codex reasoning effort.
+        required: false
+        default: medium
+        type: string
+      codex-version:
+        description: Exact Codex CLI version.
+        required: false
+        default: 0.163.0
+        type: string
+      max-diff-bytes:
+        description: Largest unified diff, in bytes, that is reviewed. Larger diffs fail the check.
+        required: false
+        default: 2000000
+        type: number
+      blocking-severities:
+        description: Comma-separated finding severities that fail the check.
+        required: false
+        default: P0,P1
+        type: string
+      review-instructions:
+        description: Additional repository-owned review instructions.
+        required: false
+        default: ''
+        type: string
+      command:
+        description: Slash command that requests a review.
+        required: false
+        default: /codex-review
+        type: string
+      pull_request_number:
+        description: Pull request number for workflow_dispatch callers.
+        required: false
+        default: ''
+        type: string
+      head_sha:
+        description: Expected head for workflow_dispatch callers; a moved head is skipped.
+        required: false
+        default: ''
+        type: string
+    secrets:
+      OPENAI_API_KEY:
+        description: OpenAI API key passed explicitly by the caller.
+        required: true
+    outputs:
+      conclusion:
+        description: Conclusion of the Codex Code Review check.
+        value: ${{ jobs.review.outputs.conclusion }}
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      requested: ${{ steps.request.outputs.requested }}
+      number: ${{ steps.request.outputs.number }}
+      head_sha: ${{ steps.request.outputs.head_sha }}
+      base_ref: ${{ steps.request.outputs.base_ref }}
+      comment_id: ${{ steps.request.outputs.comment_id }}
+      focus: ${{ steps.request.outputs.args }}
+    steps:
+      - name: Check out the reviewer implementation
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .codex-review-source
+          sparse-checkout: .github/scripts/pr-command
+          persist-credentials: false
+
+      - name: Authorize the review request
+        id: request
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          COMMAND: ${{ inputs.command }}
+          REQUESTED_PULL_NUMBER: ${{ inputs.pull_request_number }}
+          EXPECTED_HEAD_SHA: ${{ inputs.head_sha }}
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const { resolvePullRequestCommand } = await import(pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.codex-review-source/.github/scripts/pr-command/command.mjs`,
+            ).href);
+            // Reviews never execute pull-request code, so forks are accepted.
+            await resolvePullRequestCommand({
+              github, context, core, command: process.env.COMMAND,
+              requestedNumber: process.env.REQUESTED_PULL_NUMBER,
+              expectedHeadSha: process.env.EXPECTED_HEAD_SHA, allowForks: true,
+            });
+
+  review:
+    needs: resolve
+    if: needs.resolve.outputs.requested == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      checks: write
+      contents: read
+      issues: write
+      pull-requests: write
+    outputs:
+      conclusion: ${{ steps.publish.outputs.conclusion }}
+    env:
+      PULL_REQUEST_NUMBER: ${{ needs.resolve.outputs.number }}
+      PR_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+      PR_BASE_REF: ${{ needs.resolve.outputs.base_ref }}
+      REQUEST_COMMENT_ID: ${{ needs.resolve.outputs.comment_id }}
+      BLOCKING_SEVERITIES: ${{ inputs.blocking-severities }}
+      MAX_DIFF_BYTES: ${{ inputs.max-diff-bytes }}
+      DETAILS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      DIFF_FILE: .codex-review/pr.diff
+      FILES_FILE: .codex-review/files.txt
+      RESULT_FILE: ${{ github.workspace }}/.codex-review/result.json
+    steps:
+      - name: Mark the review in progress
+        id: start
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { data: check } = await github.rest.checks.create({
+              owner, repo, name: 'Codex Code Review', head_sha: process.env.PR_HEAD_SHA,
+              status: 'in_progress', started_at: new Date().toISOString(),
+              details_url: process.env.DETAILS_URL,
+              external_id: `${context.runId}:${process.env.PULL_REQUEST_NUMBER}`,
+              output: {
+                title: 'Review in progress',
+                summary: `Codex is reviewing \`${process.env.PR_HEAD_SHA}\`. [Open the Actions run](${process.env.DETAILS_URL}).`,
+              },
+            });
+            core.setOutput('check_run_id', String(check.id));
+            const commentId = Number(process.env.REQUEST_COMMENT_ID);
+            if (Number.isSafeInteger(commentId) && commentId > 0) {
+              await github.rest.reactions.createForIssueComment({
+                owner, repo, comment_id: commentId, content: 'eyes',
+              }).catch((error) => core.warning(`Could not react: ${error.message}`));
+            }
+
+      - name: Fetch the pull request and build its diff without checking it out
+        id: prepare
+        env:
+          FETCH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          fail() {
+            echo "failure_reason=$1" >> "$GITHUB_OUTPUT"
+            echo "::error title=Codex review preparation failed::$1"
+            exit 1
+          }
+          [ -n "$OPENAI_API_KEY" ] || fail "The calling workflow did not pass the OPENAI_API_KEY secret."
+          out="$RUNNER_TEMP/codex-review"
+          git_dir="$RUNNER_TEMP/codex-review-pr.git"
+          mkdir -p "$out"
+          git init -q --bare "$git_dir"
+          auth="$(printf 'x-access-token:%s' "$FETCH_TOKEN" | base64 | tr -d '\n')"
+          git --git-dir="$git_dir" -c "http.extraheader=AUTHORIZATION: basic $auth" \
+            fetch -q --no-tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" \
+            "+refs/heads/$PR_BASE_REF:refs/codex-review/base" \
+            "+refs/pull/$PULL_REQUEST_NUMBER/head:refs/codex-review/head" \
+            || fail "Could not fetch the base branch and pull-request head."
+          head="$(git --git-dir="$git_dir" rev-parse 'refs/codex-review/head^{commit}')"
+          [ "$head" = "$PR_HEAD_SHA" ] \
+            || fail "The pull-request head moved from $PR_HEAD_SHA to $head after the request; request a new review."
+          base_tip="$(git --git-dir="$git_dir" rev-parse 'refs/codex-review/base^{commit}')"
+          merge_base="$(git --git-dir="$git_dir" merge-base "$base_tip" "$head")" \
+            || fail "The pull request has no merge base with $PR_BASE_REF."
+          git --git-dir="$git_dir" -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv -M \
+            "$merge_base" "$head" > "$out/pr.diff"
+          git --git-dir="$git_dir" -c core.quotePath=false diff --no-color --name-status -M \
+            "$merge_base" "$head" > "$out/files.txt"
+          rm -rf -- "$git_dir"
+          bytes="$(wc -c < "$out/pr.diff" | tr -d ' ')"
+          too_large=false
+          [ "$bytes" -le "$MAX_DIFF_BYTES" ] || too_large=true
+          {
+            echo "base_tip_sha=$base_tip"
+            echo "merge_base_sha=$merge_base"
+            echo "diff_bytes=$bytes"
+            echo "too_large=$too_large"
+          } >> "$GITHUB_OUTPUT"
+          echo "Diff $merge_base..$head: $bytes bytes, $(wc -l < "$out/files.txt" | tr -d ' ') files."
+
+      - name: Check out the trusted base branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ steps.prepare.outputs.base_tip_sha }}
+          persist-credentials: false
+
+      - name: Check out the reviewer implementation
+        if: always() && steps.start.outcome == 'success'
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .codex-review-source
+          sparse-checkout: .github/scripts/codex-review
+          persist-credentials: false
+
+      - name: Write the review prompt
+        env:
+          PR_BASE_TIP_SHA: ${{ steps.prepare.outputs.base_tip_sha }}
+          PR_MERGE_BASE_SHA: ${{ steps.prepare.outputs.merge_base_sha }}
+          DIFF_BYTES: ${{ steps.prepare.outputs.diff_bytes }}
+          REVIEW_INSTRUCTIONS: ${{ inputs.review-instructions }}
+          REVIEW_FOCUS: ${{ needs.resolve.outputs.focus }}
+        run: |
+          set -euo pipefail
+          mkdir -p .codex-review
+          cp "$RUNNER_TEMP/codex-review/pr.diff" "$DIFF_FILE"
+          cp "$RUNNER_TEMP/codex-review/files.txt" "$FILES_FILE"
+          node .codex-review-source/.github/scripts/codex-review/prompt.mjs .codex-review/prompt.md
+
+      - name: Run Codex
+        id: codex
+        if: steps.prepare.outputs.too_large == 'false' && steps.prepare.outputs.diff_bytes != '0'
+        continue-on-error: true
+        uses: openai/codex-action@306c6a196a99dcc6582530c396a19d2672d5e9ec # v1.14
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: ${{ github.workspace }}/.codex-review/prompt.md
+          output-file: ${{ env.RESULT_FILE }}
+          output-schema-file: ${{ github.workspace }}/.codex-review-source/.github/scripts/codex-review/review-output-schema.json
+          model: ${{ inputs.model }}
+          effort: ${{ inputs.effort }}
+          codex-version: ${{ inputs.codex-version }}
+          codex-home: ${{ runner.temp }}/codex-home
+          permission-profile: ':read-only'
+          safety-strategy: drop-sudo
+
+      - name: Publish the review and complete the check
+        id: publish
+        if: always() && steps.start.outcome == 'success'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          CHECK_RUN_ID: ${{ steps.start.outputs.check_run_id }}
+          JOB_STATUS: ${{ job.status }}
+          PREPARE_OUTCOME: ${{ steps.prepare.outcome }}
+          PREPARE_FAILURE: ${{ steps.prepare.outputs.failure_reason }}
+          TOO_LARGE: ${{ steps.prepare.outputs.too_large }}
+          DIFF_BYTES: ${{ steps.prepare.outputs.diff_bytes }}
+          CODEX_OUTCOME: ${{ steps.codex.outcome }}
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const { publishReview } = await import(pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.codex-review-source/.github/scripts/codex-review/publish.mjs`,
+            ).href);
+            await publishReview({ github, context, core });
+
+      - name: Fail the check if publishing did not complete
+        if: always() && steps.start.outcome == 'success' && steps.publish.outcome != 'success'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          CHECK_RUN_ID: ${{ steps.start.outputs.check_run_id }}
+        with:
+          script: |
+            await github.rest.checks.update({
+              ...context.repo, check_run_id: Number(process.env.CHECK_RUN_ID),
+              status: 'completed', conclusion: 'failure', completed_at: new Date().toISOString(),
+              output: {
+                title: 'Review could not be published',
+                summary: `[Open the Actions run](${process.env.DETAILS_URL}).`,
+              },
+            });
+
+      - name: Report the review result
+        if: always()
+        env:
+          CONCLUSION: ${{ steps.publish.outputs.conclusion }}
+        run: |
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "::error title=Codex Code Review::Conclusion: ${CONCLUSION:-not published}"
+            exit 1
+          fi

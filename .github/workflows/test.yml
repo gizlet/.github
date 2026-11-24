@@ -1,0 +1,77 @@
+name: Tests
+
+# Copyable example of a command-gated CI workflow. Pull requests run it through
+# triage.yml (automatic) or a `/test` comment; both execute this file from
+# the default branch, so a pull request cannot rewrite its own required check.
+
+on:
+  push:
+    branches: [main]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Pull request to test; leave empty to test the selected branch.
+        required: false
+        default: ''
+        type: string
+      head_sha:
+        description: Expected pull-request head, set by automatic triggers.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  start:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '')
+      || (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '/test'))
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/pr-check-start.yml
+    with:
+      check-name: Tests
+      command: /test
+      pull_request_number: ${{ inputs.pull_request_number }}
+      head_sha: ${{ inputs.head_sha }}
+
+  test:
+    needs: start
+    if: >-
+      !cancelled() && (
+        needs.start.outputs.run == 'true'
+        || (needs.start.result == 'skipped' && github.event_name != 'issue_comment'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The job runs pull-request code: read-only token and no secrets.
+    permissions:
+      contents: read
+    concurrency:
+      group: tests-${{ needs.start.outputs.number || github.ref }}
+      cancel-in-progress: ${{ needs.start.outputs.number != '' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.start.outputs.head_sha || github.sha }}
+          persist-credentials: false
+      - name: Workflow script tests
+        run: node --test .github/scripts/pr-command/test.mjs .github/scripts/codex-review/test.mjs
+
+  finish:
+    needs: [start, test]
+    if: always() && needs.start.outputs.run == 'true'
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/pr-check-finish.yml
+    with:
+      check_run_id: ${{ needs.start.outputs.check_run_id }}
+      comment_id: ${{ needs.start.outputs.comment_id }}
+      result: ${{ needs.test.result }}

@@ -1,0 +1,53 @@
+name: PR check finish
+
+# Completes the check created by pr-check-start.yml from the caller job result.
+
+on:
+  workflow_call:
+    inputs:
+      check_run_id:
+        description: check_run_id output of pr-check-start.yml.
+        required: true
+        type: string
+      comment_id:
+        description: comment_id output of pr-check-start.yml.
+        required: false
+        default: ''
+        type: string
+      result:
+        description: needs.<job>.result of the caller job (success, failure, cancelled, or skipped).
+        required: true
+        type: string
+
+jobs:
+  finish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out the command implementation
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .pr-command-source
+          sparse-checkout: .github/scripts/pr-command
+          persist-credentials: false
+
+      - name: Complete the check
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          CHECK_RUN_ID: ${{ inputs.check_run_id }}
+          REQUEST_COMMENT_ID: ${{ inputs.comment_id }}
+          JOB_RESULT: ${{ inputs.result }}
+          DETAILS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const { finishCheck } = await import(pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.pr-command-source/.github/scripts/pr-command/check.mjs`,
+            ).href);
+            await finishCheck({ github, context, core });

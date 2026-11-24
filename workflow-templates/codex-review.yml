@@ -3,7 +3,7 @@ name: Codex review
 # Reviews the pull-request diff with Codex and reports the `Codex Code Review`
 # check. triage.yml starts it automatically; a user with write access reruns it
 # by commenting `/codex-review`. Runs on GitHub-hosted runners and never
-# executes pull-request code. See https://github.com/gizlet/github-workflows.
+# executes pull-request code. See https://github.com/gizlet/.github.
 
 on:
   issue_comment:
@@ -36,7 +36,7 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
-    uses: gizlet/github-workflows/.github/workflows/codex-review.yml@latest
+    uses: gizlet/.github/.github/workflows/codex-review.yml@latest
     with:
       pull_request_number: ${{ inputs.pull_request_number }}
       head_sha: ${{ inputs.head_sha }}

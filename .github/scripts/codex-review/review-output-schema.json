@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "findings"],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "One to three sentences assessing the change overall."
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "title", "body", "path", "line"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["P0", "P1", "P2", "P3"]
+          },
+          "title": {
+            "type": "string",
+            "description": "One-sentence statement of the defect."
+          },
+          "body": {
+            "type": "string",
+            "description": "Markdown: concrete failure scenario and suggested fix."
+          },
+          "path": {
+            "type": "string",
+            "description": "Repository-relative new-side path from the diff, or an empty string."
+          },
+          "line": {
+            "type": "integer",
+            "description": "New-side line number of an added or context diff line, or 0."
+          }
+        }
+      }
+    }
+  }
+}

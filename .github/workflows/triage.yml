@@ -1,0 +1,25 @@
+name: PR triage
+
+# Copyable caller. Starts CI and Codex review automatically for pull requests
+# whose branch is in this repository. In a consuming repository replace the
+# local `uses` path with
+# gizlet/.github/.github/workflows/pr-auto-trigger.yml@latest.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+      pull-requests: read
+    uses: ./.github/workflows/pr-auto-trigger.yml
+    with:
+      workflows: test.yml,pr-review.yml
+      command: /test

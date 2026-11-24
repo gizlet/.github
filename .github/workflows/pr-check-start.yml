@@ -1,0 +1,112 @@
+name: PR check start
+
+# Authorizes a slash command (issue_comment) or a dispatch for a pull request
+# and creates an in-progress check on its head. Pair with pr-check-finish.yml;
+# run the caller's own job between them with read-only permissions.
+
+on:
+  workflow_call:
+    inputs:
+      check-name:
+        description: Name of the check created on the pull-request head.
+        required: true
+        type: string
+      command:
+        description: Slash command that requests the job, such as /test.
+        required: true
+        type: string
+      allow-forks:
+        description: Also accept pull requests from forks. Keep false for jobs that execute pull-request code.
+        required: false
+        default: false
+        type: boolean
+      pull_request_number:
+        description: Pull request number for workflow_dispatch callers.
+        required: false
+        default: ''
+        type: string
+      head_sha:
+        description: Expected head for workflow_dispatch callers; a moved head is skipped.
+        required: false
+        default: ''
+        type: string
+    outputs:
+      run:
+        description: "'true' when the caller's job should run."
+        value: ${{ jobs.start.outputs.run }}
+      number:
+        value: ${{ jobs.start.outputs.number }}
+      head_sha:
+        description: Pull-request head to check out and test.
+        value: ${{ jobs.start.outputs.head_sha }}
+      base_ref:
+        value: ${{ jobs.start.outputs.base_ref }}
+      args:
+        description: Text after the command on the same line.
+        value: ${{ jobs.start.outputs.args }}
+      check_run_id:
+        value: ${{ jobs.start.outputs.check_run_id }}
+      comment_id:
+        value: ${{ jobs.start.outputs.comment_id }}
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: write
+    outputs:
+      run: ${{ steps.start.outputs.requested }}
+      number: ${{ steps.start.outputs.number }}
+      head_sha: ${{ steps.start.outputs.head_sha }}
+      base_ref: ${{ steps.start.outputs.base_ref }}
+      args: ${{ steps.start.outputs.args }}
+      check_run_id: ${{ steps.start.outputs.check_run_id }}
+      comment_id: ${{ steps.start.outputs.comment_id }}
+    steps:
+      - name: Check out the command implementation
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .pr-command-source
+          sparse-checkout: .github/scripts/pr-command
+          persist-credentials: false
+
+      - name: Authorize the request and start the check
+        id: start
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          CHECK_NAME: ${{ inputs.check-name }}
+          COMMAND: ${{ inputs.command }}
+          ALLOW_FORKS: ${{ inputs.allow-forks }}
+          REQUESTED_PULL_NUMBER: ${{ inputs.pull_request_number }}
+          EXPECTED_HEAD_SHA: ${{ inputs.head_sha }}
+          DETAILS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const source = (name) => pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.pr-command-source/.github/scripts/pr-command/${name}`,
+            ).href;
+            const { resolvePullRequestCommand } = await import(source('command.mjs'));
+            const { startCheck } = await import(source('check.mjs'));
+            const request = await resolvePullRequestCommand({
+              github, context, core,
+              command: process.env.COMMAND,
+              requestedNumber: process.env.REQUESTED_PULL_NUMBER,
+              expectedHeadSha: process.env.EXPECTED_HEAD_SHA,
+              allowForks: process.env.ALLOW_FORKS === 'true',
+            });
+            if (!request.requested) return;
+            await startCheck({
+              github, context, core,
+              env: {
+                ...process.env,
+                PR_HEAD_SHA: request.head_sha,
+                PULL_REQUEST_NUMBER: request.number,
+                REQUEST_COMMENT_ID: request.comment_id,
+              },
+            });
