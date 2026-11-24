@@ -37,6 +37,7 @@ jobs:
       pull-requests: write
     uses: gizlet/.github/.github/workflows/pr-check-start.yml@latest
     with:
+      runner: ${{ vars.BUILD_RUNNER || 'ubuntu-latest' }}
       check-name: CI
       command: /test
       pull_request_number: ${{ inputs.pull_request_number }}
@@ -79,6 +80,7 @@ jobs:
       pull-requests: write
     uses: gizlet/.github/.github/workflows/pr-check-finish.yml@latest
     with:
+      runner: ${{ vars.BUILD_RUNNER || 'ubuntu-latest' }}
       check_run_id: ${{ needs.start.outputs.check_run_id }}
       comment_id: ${{ needs.start.outputs.comment_id }}
       result: ${{ needs.build.result }}

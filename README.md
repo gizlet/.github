@@ -39,9 +39,10 @@ templates:
    pull request that adds them cannot run them.
 4. In branch protection, require `Codex Code Review` and `CI` (source: GitHub
    Actions).
-5. Optionally set the `BUILD_RUNNER` repository variable to a self-hosted
-   runner for the build job, and set "Require approval for all outside
-   collaborators" under Actions settings. Triage and review always run on
+5. The `BUILD_RUNNER` organization variable names the self-hosted runner
+   (ARC scale set) for the build, start and finish jobs; without it they use
+   `ubuntu-latest`. `scripts/apply-repo-settings.sh` requires approval for
+   all outside collaborators on public repositories. Triage and review always run on
    GitHub-hosted runners.
 
 The `OPENAI_API_KEY` organization secret is available to every repository.
