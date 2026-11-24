@@ -37,6 +37,7 @@ jobs:
       pull-requests: write
     uses: gizlet/.github/.github/workflows/pr-check-start.yml@latest
     with:
+      runner: ${{ fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' }}
       check-name: CI
       command: /test
       pull_request_number: ${{ inputs.pull_request_number }}
@@ -49,8 +50,9 @@ jobs:
       !cancelled() && (
         needs.start.outputs.run == 'true'
         || (needs.start.result == 'skipped' && github.event_name != 'issue_comment'))
-    # Set the BUILD_RUNNER repository variable to use a self-hosted runner.
-    runs-on: ${{ vars.BUILD_RUNNER || 'ubuntu-latest' }}
+    # The RUNNERS organization variable maps platforms to self-hosted runners.
+    # Use a platform key such as linux-arm64 when the build needs one.
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' }}
     timeout-minutes: 60
     # The job runs pull-request code: read-only token and no secrets.
     permissions:
@@ -79,6 +81,7 @@ jobs:
       pull-requests: write
     uses: gizlet/.github/.github/workflows/pr-check-finish.yml@latest
     with:
+      runner: ${{ fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' }}
       check_run_id: ${{ needs.start.outputs.check_run_id }}
       comment_id: ${{ needs.start.outputs.comment_id }}
       result: ${{ needs.build.result }}

@@ -15,6 +15,11 @@ on:
         description: Slash command that requests the job, such as /test.
         required: true
         type: string
+      runner:
+        description: Runner for this job. Callers pass fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' so only triage and Codex review use GitHub-hosted runners.
+        required: false
+        default: ubuntu-latest
+        type: string
       allow-forks:
         description: Also accept pull requests from forks. Keep false for jobs that execute pull-request code.
         required: false
@@ -51,7 +56,7 @@ on:
 
 jobs:
   start:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 5
     permissions:
       checks: write

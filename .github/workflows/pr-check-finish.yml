@@ -14,6 +14,11 @@ on:
         required: false
         default: ''
         type: string
+      runner:
+        description: Runner for this job. Callers pass fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' so only triage and Codex review use GitHub-hosted runners.
+        required: false
+        default: ubuntu-latest
+        type: string
       result:
         description: needs.<job>.result of the caller job (success, failure, cancelled, or skipped).
         required: true
@@ -21,7 +26,7 @@ on:
 
 jobs:
   finish:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 5
     permissions:
       checks: write

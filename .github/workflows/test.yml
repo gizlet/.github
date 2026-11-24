@@ -36,6 +36,7 @@ jobs:
       pull-requests: write
     uses: ./.github/workflows/pr-check-start.yml
     with:
+      runner: ${{ fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' }}
       check-name: Tests
       command: /test
       pull_request_number: ${{ inputs.pull_request_number }}
@@ -47,7 +48,7 @@ jobs:
       !cancelled() && (
         needs.start.outputs.run == 'true'
         || (needs.start.result == 'skipped' && github.event_name != 'issue_comment'))
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' }}
     timeout-minutes: 10
     # The job runs pull-request code: read-only token and no secrets.
     permissions:
@@ -72,6 +73,7 @@ jobs:
       pull-requests: write
     uses: ./.github/workflows/pr-check-finish.yml
     with:
+      runner: ${{ fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' }}
       check_run_id: ${{ needs.start.outputs.check_run_id }}
       comment_id: ${{ needs.start.outputs.comment_id }}
       result: ${{ needs.test.result }}
