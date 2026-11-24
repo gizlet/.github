@@ -46,7 +46,8 @@ The `OPENAI_API_KEY` organization secret is available to every repository.
 
 ## Runners
 
-Only triage and Codex review run on GitHub-hosted runners. Every build, test,
+Triage, Codex review and the check start/finish jobs (GitHub API calls only)
+run on GitHub-hosted runners. Every build, test,
 package and release job runs on the self-hosted runner that the `RUNNERS`
 organization variable names for its platform. `RUNNERS` is a JSON object whose
 values are `runs-on` strings, normally ARC scale set names:
@@ -63,8 +64,8 @@ values are `runs-on` strings, normally ARC scale set names:
 }
 ```
 
-`default` runs platform-independent jobs such as check start/finish, version
-checks and publishing. A job looks its runner up with
+`default` runs platform-independent build jobs such as version checks and
+publishing. A job looks its runner up with
 `fromJSON(vars.RUNNERS || '{}')['<key>'] || '<github-hosted label>'`, so a
 missing key falls back to the matching GitHub-hosted runner until that
 platform's self-hosted runner exists.

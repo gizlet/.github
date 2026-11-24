@@ -36,7 +36,6 @@ jobs:
       pull-requests: write
     uses: ./.github/workflows/pr-check-start.yml
     with:
-      runner: ${{ fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' }}
       check-name: Tests
       command: /test
       pull_request_number: ${{ inputs.pull_request_number }}
@@ -61,6 +60,10 @@ jobs:
         with:
           ref: ${{ needs.start.outputs.head_sha || github.sha }}
           persist-credentials: false
+      # Self-hosted runner images may not ship Node.js.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
       - name: Workflow script tests
         run: node --test .github/scripts/pr-command/test.mjs .github/scripts/codex-review/test.mjs
 
@@ -73,7 +76,6 @@ jobs:
       pull-requests: write
     uses: ./.github/workflows/pr-check-finish.yml
     with:
-      runner: ${{ fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' }}
       check_run_id: ${{ needs.start.outputs.check_run_id }}
       comment_id: ${{ needs.start.outputs.comment_id }}
       result: ${{ needs.test.result }}

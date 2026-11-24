@@ -15,7 +15,7 @@ on:
         default: ''
         type: string
       runner:
-        description: Runner for this job. Callers pass fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' so only triage and Codex review use GitHub-hosted runners.
+        description: Deprecated and ignored; the job always runs on a GitHub-hosted runner.
         required: false
         default: ubuntu-latest
         type: string
@@ -26,7 +26,7 @@ on:
 
 jobs:
   finish:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       checks: write
