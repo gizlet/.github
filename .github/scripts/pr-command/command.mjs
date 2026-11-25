@@ -5,7 +5,7 @@ const MAX_ARGS_LENGTH = 500;
 // GitHub's legacy `permission` field maps maintain to write and triage to read.
 const TRUSTED_PERMISSIONS = new Set(['admin', 'maintain', 'write']);
 
-// Dispatches created with a workflow's GITHUB_TOKEN, such as pr-auto-trigger.
+// Dispatches created with a workflow's GITHUB_TOKEN, such as pr-triage.
 // Only workflows running in the calling repository can create them.
 export const AUTOMATION_ACTOR = 'github-actions[bot]';
 
