@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decideAuto, parseCommandMap, triage } from './triage.mjs';
+import { decideAuto, parseCommandList, triage, triageComment } from './triage.mjs';
 import { checkResultFor, finishCheck, startCheck } from './check.mjs';
 import {
-  isTrustedPermission, parseCommand, resolvePullRequestCommand, validateCommand,
+  headMarker, isTrustedPermission, markedHead, parseCommand, resolvePullRequestCommand, validateCommand,
 } from './command.mjs';
 
 const REPO = { owner: 'gizlet', repo: 'example' };
-const SHA = 'h'.repeat(40);
+const SHA = 'c'.repeat(40);
 
 test('parses commands on their own line only', () => {
   const parse = (body) => parseCommand(body, '/codex-review');
@@ -23,8 +23,8 @@ test('parses commands on their own line only', () => {
   assert.deepEqual(parse('~~~\n```\n/codex-review\n~~~\n/codex-review'), { requested: true, args: '' });
   assert.deepEqual(parse('@codex review'), { requested: false, args: '' });
   assert.equal(parse(`/codex-review ${'x'.repeat(900)}`).args.length, 500);
-  assert.deepEqual(parseCommand('/test', '/test'), { requested: true, args: '' });
-  assert.deepEqual(parseCommand('/testing', '/test'), { requested: false, args: '' });
+  assert.deepEqual(parseCommand('/ci', '/ci'), { requested: true, args: '' });
+  assert.deepEqual(parseCommand('/cip', '/ci'), { requested: false, args: '' });
 });
 
 test('validates command names', () => {
@@ -65,15 +65,16 @@ const fakeGithub = ({ permission = 'write', missingUser = false, pr = pull() } =
         create: async (request) => { calls.push(['create', request.name, request.head_sha, request.status]); return { data: { id: 55 } }; },
         update: async (request) => { calls.push(['update', request.check_run_id, request.conclusion]); },
       },
-      issues: { createComment: async ({ body }) => { calls.push(['comment', body]); } },
+      issues: { createComment: async ({ issue_number, body }) => { calls.push(['comment', issue_number, body]); return { data: { id: 123 } }; } },
       actions: { createWorkflowDispatch: async (request) => { calls.push(['dispatch', request.workflow_id, request.ref, request.inputs]); } },
     },
   };
 };
-const commentContext = (body, type = 'User') => ({
+const commentContext = (body, type = 'User', login = 'alice') => ({
   eventName: 'issue_comment', repo: REPO,
-  payload: { action: 'created', issue: { number: 7, pull_request: {} }, comment: { id: 99, body, user: { login: 'alice', type } } },
+  payload: { action: 'created', issue: { number: 7, pull_request: {} }, comment: { id: 99, body, user: { login, type } } },
 });
+const botContext = (body) => commentContext(body, 'Bot', 'gizlet-bot[bot]');
 const dispatchContext = (actor = 'alice') => ({ eventName: 'workflow_dispatch', actor, repo: REPO, payload: { sender: { login: actor } } });
 
 test('resolves an authorized comment command', async () => {
@@ -111,27 +112,57 @@ test('accepts forks only when allowed', async () => {
   assert.equal(result.requested, true);
 });
 
-test('resolves dispatches from writers and automation', async () => {
+test('resolves dispatches from writers only', async () => {
   const core = fakeCore();
   const github = fakeGithub();
-  const result = await resolvePullRequestCommand({ github, context: dispatchContext(), core, command: '/test', requestedNumber: ' 12 ' });
+  const result = await resolvePullRequestCommand({ github, context: dispatchContext(), core, command: '/ci', requestedNumber: ' 12 ' });
   assert.equal(result.number, '12');
   assert.equal(core.outputs.comment_id, '');
   assert.deepEqual(github.calls, [['permission', 'alice']]);
 
-  const automation = fakeGithub({ permission: 'none' });
+  // Nothing dispatches on a writer's behalf any more, workflows included.
   const automated = await resolvePullRequestCommand({
-    github: automation, context: dispatchContext('github-actions[bot]'), core: fakeCore(), command: '/test', requestedNumber: '12', expectedHeadSha: SHA,
+    github: fakeGithub({ missingUser: true }), context: dispatchContext('github-actions[bot]'), core: fakeCore(), command: '/ci', requestedNumber: '12',
   });
-  assert.equal(automated.requested, true);
-  assert.deepEqual(automation.calls, []);
+  assert.equal(automated.requested, false);
 
-  const reader = await resolvePullRequestCommand({ github: fakeGithub({ permission: 'read' }), context: dispatchContext('bob'), core: fakeCore(), command: '/test', requestedNumber: '12' });
+  const reader = await resolvePullRequestCommand({ github: fakeGithub({ permission: 'read' }), context: dispatchContext('bob'), core: fakeCore(), command: '/ci', requestedNumber: '12' });
   assert.equal(reader.requested, false);
-  const moved = await resolvePullRequestCommand({ github: fakeGithub(), context: dispatchContext(), core: fakeCore(), command: '/test', requestedNumber: '12', expectedHeadSha: 'a'.repeat(40) });
+  const moved = await resolvePullRequestCommand({ github: fakeGithub(), context: dispatchContext(), core: fakeCore(), command: '/ci', requestedNumber: '12', expectedHeadSha: 'a'.repeat(40) });
   assert.equal(moved.requested, false);
   assert.match(moved.reason, /moved/);
-  await assert.rejects(resolvePullRequestCommand({ github: fakeGithub(), context: dispatchContext(), core: fakeCore(), command: '/test', requestedNumber: 'x' }));
+  await assert.rejects(resolvePullRequestCommand({ github: fakeGithub(), context: dispatchContext(), core: fakeCore(), command: '/ci', requestedNumber: 'x' }));
+});
+
+test('trusts gizlet-bot comments for the head they name', async () => {
+  const body = triageComment(['/ci', '/codex-review'], SHA);
+  assert.equal(markedHead(body), SHA);
+  assert.equal(markedHead('/ci'), '');
+  assert.equal(headMarker(SHA), `<!-- gizlet-triage head_sha=${SHA} -->`);
+
+  const github = fakeGithub({ missingUser: true });
+  const core = fakeCore();
+  const result = await resolvePullRequestCommand({ github, context: botContext(body), core, command: '/ci' });
+  assert.equal(result.requested, true, result.reason);
+  assert.equal(core.outputs.requester, 'gizlet-bot[bot]');
+  assert.equal(core.outputs.args, '');
+  assert.deepEqual(github.calls, [], 'no permission lookup for the bot');
+  assert.equal((await resolvePullRequestCommand({ github: fakeGithub(), context: botContext(body), core: fakeCore(), command: '/codex-review' })).requested, true);
+
+  // A newer push has its own comment: an older one does nothing, quietly.
+  const old = await resolvePullRequestCommand({ github: fakeGithub(), context: botContext(triageComment(['/ci'], 'a'.repeat(40))), core: fakeCore(), command: '/ci' });
+  assert.equal(old.requested, false);
+  assert.match(old.reason, /moved/);
+  // Without a marker, or from any other bot, a comment runs nothing.
+  for (const context of [botContext('/ci'), commentContext(body, 'Bot', 'other-bot[bot]'), commentContext(body, 'Bot', 'github-actions[bot]')]) {
+    const github = fakeGithub();
+    const refused = await resolvePullRequestCommand({ github, context, core: fakeCore(), command: '/ci' });
+    assert.equal(refused.requested, false, refused.reason);
+    assert.deepEqual(github.calls, [], refused.reason);
+  }
+  // A user cannot borrow the bot's marker to pin another head: users need write access as always.
+  const reader = await resolvePullRequestCommand({ github: fakeGithub({ permission: 'read' }), context: commentContext(body), core: fakeCore(), command: '/ci' });
+  assert.equal(reader.requested, false);
 });
 
 test('starts and finishes checks', async () => {
@@ -151,79 +182,38 @@ test('starts and finishes checks', async () => {
   assert.equal(checkResultFor('').title, 'Did not run');
 });
 
-test('parses command mappings', () => {
-  assert.deepEqual(parseCommandMap('/test=build.yml\n /codex-review = codex-review.yml\n'), [
-    { command: '/test', workflows: ['build.yml'] },
-    { command: '/codex-review', workflows: ['codex-review.yml'] },
-  ]);
-  assert.deepEqual(parseCommandMap('/test=ci.yml release.yml ci.yml'), [{ command: '/test', workflows: ['ci.yml', 'release.yml'] }]);
-  for (const bad of ['', 'test=ci.yml', '/test', '/test=../x.yml', '/test=a/b.yml', '/test=a.yml\n/TEST=b.yml']) {
-    assert.throws(() => parseCommandMap(bad), bad);
-  }
+test('parses the commands to comment', () => {
+  assert.deepEqual(parseCommandList('/ci\n /codex-review \n'), ['/ci', '/codex-review']);
+  assert.deepEqual(parseCommandList('/ci, /codex-review'), ['/ci', '/codex-review']);
+  // The older mapping form still parses; its workflows are ignored.
+  assert.deepEqual(parseCommandList('/test=build.yml\n/codex-review=codex-review.yml'), ['/test', '/codex-review']);
+  for (const bad of ['', 'ci', '/', '/ci\n/CI', '/c i']) assert.throws(() => parseCommandList(bad), bad);
 });
 
-const COMMANDS = '/test=build.yml\n/codex-review=codex-review.yml';
-const run = (github, body, { type = 'User', action = 'created', onPr = true, env = {} } = {}) => triage({
-  github, core: fakeCore(), env: { COMMANDS, ...env },
-  context: {
-    eventName: 'issue_comment', repo: REPO,
-    payload: { action, issue: { number: 7, ...(onPr ? { pull_request: {} } : {}) }, comment: { id: 99, body, user: { login: 'alice', type } } },
-  },
-});
-const dispatch = (workflow) => ['dispatch', workflow, 'main', { pull_request_number: '7', head_sha: SHA }];
-
-test('dispatches the workflows of each command in the comment', async () => {
-  const github = fakeGithub();
-  const result = await run(github, '/test');
-  assert.deepEqual(result.dispatched, ['build.yml']);
-  assert.deepEqual(github.calls, [['permission', 'alice'], dispatch('build.yml'), ['reaction', 'eyes']]);
-  const both = fakeGithub();
-  await run(both, 'Ready.\n/codex-review\n/test');
-  assert.deepEqual(both.calls.filter((call) => call[0] === 'dispatch'), [dispatch('build.yml'), dispatch('codex-review.yml')]);
+test('the triage comment holds each command on its own line and the head', () => {
+  const body = triageComment(['/ci', '/codex-review'], SHA);
+  assert.equal(parseCommand(body, '/ci').requested, true);
+  assert.equal(parseCommand(body, '/codex-review').requested, true);
+  assert.equal(parseCommand(body, '/release').requested, false);
+  assert.equal(markedHead(body), SHA);
 });
 
-test('ignores comments without a command', async () => {
-  for (const [body, options] of [
-    ['looks good', {}], ['please /test', {}], ['`/test`', {}], ['> /test', {}],
-    ['/test', { type: 'Bot' }], ['/test', { action: 'edited' }], ['/test', { onPr: false }],
-  ]) {
-    const github = fakeGithub();
-    const result = await run(github, body, options);
-    assert.deepEqual(result.dispatched, [], body);
-    assert.deepEqual(github.calls, [], body);
-  }
-});
-
-test('refuses readers, closed pull requests, and forks', async () => {
-  for (const github of [
-    fakeGithub({ permission: 'read' }), fakeGithub({ missingUser: true }),
-    fakeGithub({ pr: pull({ state: 'closed' }) }), fakeGithub({ pr: pull({ fork: true }) }),
-  ]) {
-    const result = await run(github, '/test');
-    assert.equal(result.refused, true, result.reason);
-    assert.equal(github.calls.some((call) => call[0] === 'dispatch'), false);
-    assert.deepEqual(github.calls.at(-1), ['reaction', 'confused']);
-  }
-  const fork = fakeGithub({ pr: pull({ fork: true }) });
-  assert.deepEqual((await run(fork, '/codex-review', { env: { ALLOW_FORKS: 'true' } })).dispatched, ['codex-review.yml']);
-  await assert.rejects(triage({ github: fakeGithub(), core: fakeCore(), env: { COMMANDS }, context: { eventName: 'push', repo: REPO, payload: {} } }));
-});
-
+const COMMANDS = '/ci\n/codex-review';
 const prEvent = (github, action, { head = SHA } = {}) => triage({
   github, core: fakeCore(), env: { COMMANDS },
   context: { eventName: 'pull_request_target', repo: REPO, payload: { action, pull_request: { number: 7, head: { sha: head } } } },
 });
 
-test('a pull request update dispatches every mapped workflow', async () => {
+test('a pull request update gets one triage comment and no dispatch', async () => {
   for (const action of ['opened', 'reopened', 'synchronize', 'ready_for_review']) {
     const github = fakeGithub();
     const result = await prEvent(github, action);
-    assert.deepEqual(result.dispatched, ['build.yml', 'codex-review.yml'], action);
-    assert.deepEqual(github.calls, [dispatch('build.yml'), dispatch('codex-review.yml')], action);
+    assert.equal(result.commented, true, action);
+    assert.deepEqual(github.calls, [['comment', 7, triageComment(['/ci', '/codex-review'], SHA)]], action);
   }
 });
 
-test('drafts, forks, closed pull requests, stale heads and other actions start nothing', async () => {
+test('drafts, forks, closed pull requests, stale heads and other actions get no comment', async () => {
   for (const [github, action, options] of [
     [fakeGithub({ pr: pull({ draft: true }) }), 'synchronize', {}],
     [fakeGithub({ pr: pull({ fork: true }) }), 'opened', {}],
@@ -232,8 +222,16 @@ test('drafts, forks, closed pull requests, stale heads and other actions start n
     [fakeGithub(), 'edited', {}],
   ]) {
     const result = await prEvent(github, action, options);
-    assert.deepEqual(result.dispatched, [], result.reason);
+    assert.equal(result.commented, false, result.reason);
     assert.equal(github.calls.length, 0, result.reason);
   }
-  assert.equal(decideAuto({ action: 'labeled', pr: pull(), owner: 'gizlet', repo: 'example', eventHeadSha: SHA }).dispatch, false);
+  assert.equal(decideAuto({ action: 'labeled', pr: pull(), owner: 'gizlet', repo: 'example', eventHeadSha: SHA }).comment, false);
+});
+
+test('comments reaching triage from older callers do nothing; other events are errors', async () => {
+  const github = fakeGithub();
+  const result = await triage({ github, core: fakeCore(), env: { COMMANDS }, context: commentContext('/ci') });
+  assert.equal(result.commented, false);
+  assert.deepEqual(github.calls, []);
+  await assert.rejects(triage({ github: fakeGithub(), core: fakeCore(), env: { COMMANDS }, context: { eventName: 'push', repo: REPO, payload: {} } }));
 });

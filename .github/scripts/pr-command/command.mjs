@@ -5,9 +5,22 @@ const MAX_ARGS_LENGTH = 500;
 // GitHub's legacy `permission` field maps maintain to write and triage to read.
 const TRUSTED_PERMISSIONS = new Set(['admin', 'maintain', 'write']);
 
-// Dispatches created with a workflow's GITHUB_TOKEN, such as pr-triage.
-// Only workflows running in the calling repository can create them.
-export const AUTOMATION_ACTOR = 'github-actions[bot]';
+// The gizlet-bot GitHub App, which posts the triage comment. `[bot]` logins
+// belong to GitHub Apps and cannot be taken by a user account.
+export const TRIAGE_BOT = 'gizlet-bot[bot]';
+
+// The head a triage comment was posted for, in a hidden marker.
+const HEAD_MARKER = /<!--\s*gizlet-triage\s+head_sha=([0-9a-f]{40})\s*-->/;
+
+/** The hidden marker triage adds to its comment, naming the head it was posted for. */
+export function headMarker(headSha) {
+  return `<!-- gizlet-triage head_sha=${headSha} -->`;
+}
+
+/** The head named by a triage comment's marker, or ''. */
+export function markedHead(body) {
+  return HEAD_MARKER.exec(String(body ?? ''))?.[1] ?? '';
+}
 
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -65,11 +78,12 @@ async function permissionOf(github, owner, repo, username) {
 
 /**
  * Resolves a command from an `issue_comment` or `workflow_dispatch` event and
- * verifies that its requester has write access to the calling repository.
+ * verifies its requester: a user with write access to the calling repository,
+ * or the triage bot. A triage comment applies only to the head it names.
  * Sets `requested` and, when true, the pull-request step outputs.
  */
 export async function resolvePullRequestCommand({
-  github, context, core, command, requestedNumber = '', expectedHeadSha = '', allowForks = false,
+  github, context, core, command, requestedNumber = '', expectedHeadSha = '', allowForks = false, triageBot = TRIAGE_BOT,
 }) {
   const { owner, repo } = context.repo;
   let commentId = '';
@@ -92,17 +106,24 @@ export async function resolvePullRequestCommand({
   let number;
   let actor;
   let args = '';
+  let fromTriage = false;
+  let expected = String(expectedHeadSha ?? '').trim();
   if (context.eventName === 'issue_comment') {
     const { action, issue, comment } = context.payload;
     if (action !== 'created') return quiet('Only newly created comments run commands.');
     if (!issue?.pull_request) return quiet('The comment is not on a pull request.');
-    if (comment?.user?.type !== 'User') return quiet('Only user accounts can run commands.');
+    fromTriage = comment?.user?.type === 'Bot' && comment.user.login === triageBot;
+    if (comment?.user?.type !== 'User' && !fromTriage) return quiet(`Only user accounts and ${triageBot} can run commands.`);
     const parsed = parseCommand(comment.body, command);
     if (!parsed.requested) return quiet(`The comment has no ${command} line.`);
     number = Number(issue.number);
     actor = comment.user.login;
     commentId = String(comment.id);
-    args = parsed.args;
+    args = fromTriage ? '' : parsed.args;
+    if (fromTriage) {
+      expected = markedHead(comment.body);
+      if (!expected) return quiet(`The ${triageBot} comment names no head.`);
+    }
   } else if (context.eventName === 'workflow_dispatch') {
     number = Number(String(requestedNumber ?? '').trim());
     actor = context.actor;
@@ -113,9 +134,7 @@ export async function resolvePullRequestCommand({
     throw new Error('A positive pull request number is required.');
   }
 
-  const automation = context.eventName === 'workflow_dispatch'
-    && (actor === AUTOMATION_ACTOR || context.payload?.sender?.login === AUTOMATION_ACTOR);
-  if (!automation) {
+  if (!fromTriage) {
     const permission = await permissionOf(github, owner, repo, actor);
     if (!isTrustedPermission(permission)) {
       return skip(`${actor} has ${permission} permission; write access is required to run ${command}.`);
@@ -124,7 +143,6 @@ export async function resolvePullRequestCommand({
 
   const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
   if (pr.state !== 'open') return skip(`Pull request #${number} is not open.`);
-  const expected = String(expectedHeadSha ?? '').trim();
   if (expected && pr.head.sha !== expected) {
     return quiet(`Pull request #${number} moved from ${expected} to ${pr.head.sha}; the newer head has its own request.`);
   }

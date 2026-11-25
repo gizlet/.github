@@ -1,21 +1,25 @@
 name: Tests
 
-# Command-gated CI. Pull requests run it only when triage.yml dispatches it for
-# a writer's `/test` comment; the dispatch executes this file from the default
-# branch, so a pull request cannot rewrite its own required check.
+# Command-gated CI. Pull requests run it from a comment with a `/ci` line,
+# posted by gizlet-bot when the pull request is opened or updated, or by a
+# writer to run it again. Comment events run this file from the default
+# branch, so a pull request cannot rewrite its own required check. Do not add
+# a pull_request trigger.
 
 on:
+  issue_comment:
+    types: [created]
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
       pull_request_number:
-        description: Pull request to test; leave empty to test the selected branch.
+        description: Pull request to run for; leave empty to run on the selected branch.
         required: false
         default: ''
         type: string
       head_sha:
-        description: Expected pull-request head, set by triage.
+        description: Expected pull-request head; a moved head is skipped.
         required: false
         default: ''
         type: string
@@ -25,7 +29,11 @@ permissions:
 
 jobs:
   start:
-    if: github.event_name == 'workflow_dispatch' && inputs.pull_request_number != ''
+    # Every new comment starts this workflow; only one with a /ci line goes on.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '')
+      || (github.event_name == 'issue_comment' && github.event.issue.pull_request
+          && contains(github.event.comment.body, '/ci'))
     permissions:
       checks: write
       contents: read
@@ -33,7 +41,7 @@ jobs:
     uses: ./.github/workflows/pr-check-start.yml
     with:
       check-name: Tests
-      command: /test
+      command: /ci
       pull_request_number: ${{ inputs.pull_request_number }}
       head_sha: ${{ inputs.head_sha }}
 
@@ -42,7 +50,7 @@ jobs:
     if: >-
       !cancelled() && (
         needs.start.outputs.run == 'true'
-        || needs.start.result == 'skipped')
+        || (needs.start.result == 'skipped' && github.event_name != 'issue_comment'))
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' }}
     timeout-minutes: 10
     # The job runs pull-request code: read-only token and no secrets.

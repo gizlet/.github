@@ -1,33 +1,30 @@
 name: PR triage
 
-# Starts pull-request CI and Codex review. Opening, updating, reopening or
-# readying a pull request from a branch in this repository dispatches every
-# mapped workflow on the default branch for its head; a writer's `/test` or
-# `/codex-review` comment line runs one again. Runs on a GitHub-hosted runner
-# and never checks out pull-request code.
+# Starts pull-request CI and Codex review with a comment. Opening, updating,
+# reopening or readying a pull request from a branch in this repository makes
+# gizlet-bot comment each command below on its own line, for the current head.
+# The gated workflows listen to comments and start from it; a writer's comment
+# with the same command runs one again. Runs on a GitHub-hosted runner and
+# never checks out pull-request code.
 
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
-  issue_comment:
-    types: [created]
 
 permissions:
   contents: read
 
 jobs:
   triage:
-    if: >-
-      github.event_name == 'pull_request_target'
-      || (github.event.issue.pull_request && contains(github.event.comment.body, '/'))
     permissions:
-      actions: write
       contents: read
-      pull-requests: write
+      pull-requests: read
     uses: gizlet/.github/.github/workflows/pr-triage.yml@latest
     with:
-      # One `/command=workflow.yml [workflow.yml ...]` per line. Each workflow
-      # accepts pull_request_number and head_sha dispatch inputs.
+      # One command per line; each gated workflow runs for its own.
       commands: |
-        /test=ci.yml
-        /codex-review=codex-review.yml
+        /ci
+        /codex-review
+      client-id: ${{ vars.GIZLET_BOT_CLIENT_ID }}
+    secrets:
+      GIZLET_BOT_PRIVATE_KEY: ${{ secrets.GIZLET_BOT_PRIVATE_KEY }}
