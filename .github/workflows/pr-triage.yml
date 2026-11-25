@@ -1,41 +1,47 @@
 name: PR triage
 
-# The single entry point for pull-request CI and Codex review. It dispatches
-# the mapped workflows on the default branch with pull_request_number and
-# head_sha inputs, and never checks out pull-request code:
-# - From pull_request_target (opened, reopened, synchronize,
-#   ready_for_review): every mapped workflow, when the pull request is open,
-#   not a draft, and its branch is in the repository.
-# - From issue_comment: the workflows of each command line, such as `/test`,
-#   from a user with write access, then reacts with 👀; refused commands get 😕.
+# Starts pull-request CI and Codex review by commenting. When a pull request is
+# opened, updated, reopened or marked ready (open, not a draft, its branch in
+# the repository), the triage bot comments every command, one per line, such
+# as `/ci` and `/codex-review`. It never dispatches a workflow and never checks
+# out pull-request code.
+#
+# The gated workflows listen to new comments themselves and run when a comment
+# holds their command, from a user with write access or from the triage bot.
+# The bot comments as the gizlet-bot GitHub App: comments made with a
+# workflow's GITHUB_TOKEN start no other workflow.
 
 on:
   workflow_call:
     inputs:
       commands:
-        description: One `/command=workflow.yml [workflow.yml ...]` mapping per line.
+        description: Commands to comment, one per line, such as /ci. The older `/command=workflow.yml` form is accepted; its workflows are ignored.
         required: true
         type: string
-      allow-forks:
-        description: Also accept commands on pull requests from forks.
+      client-id:
+        description: Client ID of the triage bot GitHub App, normally vars.GIZLET_BOT_CLIENT_ID.
         required: false
-        default: false
-        type: boolean
+        default: ''
+        type: string
+    secrets:
+      GIZLET_BOT_PRIVATE_KEY:
+        description: Private key of the triage bot GitHub App.
+        required: false
     outputs:
-      dispatched:
-        description: Comma-separated workflow files that were dispatched.
-        value: ${{ jobs.triage.outputs.dispatched }}
+      comment_id:
+        description: ID of the triage comment, or empty when none was posted.
+        value: ${{ jobs.triage.outputs.comment_id }}
 
 jobs:
   triage:
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      actions: write
       contents: read
-      pull-requests: write
+      pull-requests: read
     outputs:
-      dispatched: ${{ steps.triage.outputs.dispatched }}
+      comment_id: ${{ steps.triage.outputs.comment_id }}
     steps:
       - name: Check out the triage implementation
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -46,13 +52,33 @@ jobs:
           sparse-checkout: .github/scripts/pr-command
           persist-credentials: false
 
-      - name: Authorize and dispatch
+      - name: Check the triage bot credentials
+        env:
+          CLIENT_ID: ${{ inputs.client-id }}
+          HAS_KEY: ${{ secrets.GIZLET_BOT_PRIVATE_KEY != '' }}
+        run: |
+          if [ -z "$CLIENT_ID" ] || [ "$HAS_KEY" != true ]; then
+            echo "::error title=Triage bot not configured::Pass client-id: \${{ vars.GIZLET_BOT_CLIENT_ID }} and the GIZLET_BOT_PRIVATE_KEY secret to pr-triage.yml."
+            exit 1
+          fi
+
+      - name: Get a triage bot token
+        id: token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ inputs.client-id }}
+          private-key: ${{ secrets.GIZLET_BOT_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+          permission-issues: write
+
+      - name: Comment the commands
         id: triage
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           COMMANDS: ${{ inputs.commands }}
-          ALLOW_FORKS: ${{ inputs.allow-forks }}
         with:
+          github-token: ${{ steps.token.outputs.token }}
           script: |
             const { pathToFileURL } = require('node:url');
             const { triage } = await import(pathToFileURL(

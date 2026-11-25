@@ -8,11 +8,12 @@ slash-command gating for CI that runs pull-request code).
 | --- | --- |
 | `workflow-templates/` | Callers offered under **Actions → New workflow** ("By gizlet"). |
 | `.github/workflows/codex-review.yml` | Reusable Codex code reviewer, requested with `/codex-review`. |
-| `.github/workflows/pr-triage.yml` | Reusable PR triage: starts the CI and review workflows when a PR is opened or updated, and for `/test` and `/codex-review` comments. |
-| `.github/workflows/pr-check-start.yml` | Reusable: authorizes a dispatch and starts a check on the PR head. |
+| `.github/workflows/pr-triage.yml` | Reusable PR triage: when a PR is opened or updated, gizlet-bot comments `/ci` and `/codex-review`, which starts CI and review. |
+| `.github/workflows/pr-check-start.yml` | Reusable: authorizes a command comment (or a writer's dispatch) and starts a check on the PR head. |
 | `.github/workflows/pr-check-finish.yml` | Reusable: completes that check from the CI job result. |
 | `.github/workflows/triage.yml`, `pr-review.yml`, `test.yml` | This repository's own callers. |
 | `.github/scripts/` | Implementation and unit tests. |
+| `assets/gizlet-bot.png` | gizlet-bot's avatar. |
 
 Templates are copied into a repository once. The logic stays here: callers
 reference the reusable workflows through the moving `latest` tag, for example
@@ -32,8 +33,9 @@ templates:
 
 1. In `ci.yml`, replace the placeholder `Build and test` step with the
    repository's build and test commands. It fails until replaced. Rename the
-   file or its `check-name` only together with `commands:` in `triage.yml`
-   and the branch protection rule.
+   file freely; rename its `command` only together with `commands:` in
+   `triage.yml`, and its `check-name` only together with the branch protection
+   rule.
 2. In `codex-review.yml`, describe the repository in `review-instructions`.
 3. Merge to the default branch. Triggers run the default-branch copy, so the
    pull request that adds them cannot run them.
@@ -42,7 +44,13 @@ templates:
 5. Merge to the default branch; jobs run on the runners in the `RUNNERS`
    organization variable (see below).
 
-The `OPENAI_API_KEY` organization secret is available to every repository.
+The `OPENAI_API_KEY` organization secret, and gizlet-bot's
+`GIZLET_BOT_CLIENT_ID` organization variable and `GIZLET_BOT_PRIVATE_KEY`
+organization secret, are available to every repository. gizlet-bot is a GitHub
+App owned by the organization and installed on all its repositories, with
+issues and pull requests write access and no webhook; triage comments as it
+because comments made with a workflow's `GITHUB_TOKEN` start no other
+workflow.
 
 ## Runners
 
@@ -92,38 +100,47 @@ protection; the script keeps them when it adds `Codex Code Review`.
 
 ## Triggers and commands
 
-Opening, pushing to, reopening or marking ready a pull request whose branch is
-in the repository starts every workflow mapped in `triage.yml` for its head:
-CI and Codex review. Drafts and fork pull requests start nothing on their own.
+Every run starts from a PR comment. Opening, pushing to, reopening or marking
+ready a pull request whose branch is in the repository makes triage comment as
+gizlet-bot, one command per line, for the new head:
 
-To run a workflow again, or for a draft, post a new PR comment with the
-command on its own line (not quoted and not in a code block); one comment can
-hold several commands.
+```text
+/ci
+/codex-review
+
+<sub>Triage for `1a2b3c4`. Comment a command on its own line to run it again.</sub>
+<!-- gizlet-triage head_sha=... -->
+```
+
+Drafts and fork pull requests get no comment. To run a workflow again, or for
+a draft, post a new PR comment with the command on its own line (not quoted
+and not in a code block); one comment can hold several commands.
 
 | Command | Effect |
 | --- | --- |
+| `/ci` | Runs the repository's command-gated CI and reports its check. |
 | `/codex-review` | Codex reviews the diff and reports `Codex Code Review`. |
-| `/test` | Runs the repository's command-gated CI and reports its check. |
 
-`triage.yml` is the only workflow that listens to pull-request events and
-comments. For a comment it calls
-`pr-triage.yml`, which checks that the commenter has `write`, `maintain`, or
-`admin` permission and that the PR is open and from a branch in the
-repository, then dispatches the workflows mapped to each command on the default
-branch with `pull_request_number` and `head_sha`. Accepted comments receive 👀;
-refused ones receive 😕. Edited comments, bot comments, and comments without a
-command are ignored.
+Triage never dispatches a workflow. Each gated workflow listens to
+`issue_comment` itself, and every new comment starts it; a job-level `if`
+skips comments without its command, so these runs show as skipped. When a
+comment holds the command, `pr-check-start.yml` (or the reviewer) accepts it
+from a user with `write`, `maintain` or `admin` permission, or from
+gizlet-bot, and checks that the PR is open and, for CI, from a branch in the
+repository. A gizlet-bot comment applies only to the head in its marker: after
+a newer push, the older comment runs nothing. Accepted comments receive 👀 and
+then 👍 or 👎 with the result; refused ones receive 😕. Edited comments,
+comments from other bots, and comments without a command are ignored.
 
-Every check is attached to the head commit it ran for; a push starts new
-checks for the new head. A writer can also run a workflow manually from the
-Actions tab with a PR number.
+Every check is attached to the head commit it ran for. A writer can also run a
+workflow manually from the Actions tab with a PR number.
 
 ## Codex code review
 
 The reviewer only reviews code. It does not evaluate PR titles, descriptions,
-or linked Issues. Triage dispatches it on PR updates and for `/codex-review`; a writer can also
-dispatch it manually. A dispatch whose `head_sha` is no longer the PR head is
-skipped.
+or linked Issues. It runs for a `/codex-review` comment, from gizlet-bot on PR
+updates or from a writer; a writer can also dispatch it manually. A request for
+a head that is no longer the PR head is skipped.
 
 Each review creates a `Codex Code Review` check and posts a native PR review
 with inline comments.
@@ -163,27 +180,27 @@ Codex also follows `AGENTS.md` and `CLAUDE.md` files on the base branch.
 
 CI that executes pull-request code runs in a workflow with three jobs:
 
-1. `start` calls `pr-check-start.yml`. It accepts a `workflow_dispatch` with
-   `pull_request_number` (and optionally `head_sha`) from triage or from a
-   writer. It refuses fork PRs unless `allow-forks` is true, then creates the
+1. `start` calls `pr-check-start.yml` for a new PR comment whose body contains
+   the command, or for a writer's `workflow_dispatch` with
+   `pull_request_number` (and optionally `head_sha`). It authorizes the
+   request, refuses fork PRs unless `allow-forks` is true, then creates the
    named check on the PR head.
 2. The caller's own job checks out `needs.start.outputs.head_sha` with a
-   read-only token and no secrets, and builds or tests it.
+   read-only token and no secrets, and builds or tests it. It runs when
+   `start` accepted a request, or for pushes and branch dispatches, where
+   `start` is skipped; never for a comment that `start` skipped.
 3. `finish` calls `pr-check-finish.yml` with the job result to complete the
    check.
 
 Grant `start` and `finish` `checks: write` and `pull-requests: write` (their
-API calls need it), give triage `actions: write` and `pull-requests: write`, and
-the review caller
-`checks`, `issues`, and `pull-requests` write, as in the templates.
+API calls need it), give triage `contents: read` and `pull-requests: read`
+(it comments with gizlet-bot's token), and the review caller `checks`,
+`issues`, and `pull-requests` write, as in the templates.
 
-Gated workflows have no `issue_comment` or `pull_request` trigger; only
-triage dispatches them for PRs. Dispatches always run the workflow file from
-the default branch,
-so a PR cannot weaken its own required check by editing the workflow. Do not
-add a `pull_request` trigger to a gated workflow. Push builds of the default
-branch run the job directly and may save caches; PR builds should only restore
-them.
+Gated workflows have no `pull_request` trigger. Comment and dispatch events
+always run the workflow file from the default branch, so a PR cannot weaken its
+own required check by editing the workflow. Push builds of the default branch
+run the job directly and may save caches; PR builds should only restore them.
 
 ## Development
 

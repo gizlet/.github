@@ -1,6 +1,6 @@
 {
   "name": "Gizlet PR triage",
-  "description": "Starts CI and Codex review when a pull request is opened or updated, and again for /test and /codex-review comments from writers.",
+  "description": "Comments /ci and /codex-review as gizlet-bot when a pull request is opened or updated, which starts CI and Codex review.",
   "categories": [
     "Automation"
   ]

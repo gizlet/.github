@@ -1,6 +1,6 @@
 {
   "name": "Gizlet gated CI",
-  "description": "Build and test dispatched by triage for /test; reports the CI check on the pull-request head.",
+  "description": "Build and test for /ci comments from gizlet-bot or writers; reports the CI check on the pull-request head.",
   "categories": [
     "Automation"
   ]

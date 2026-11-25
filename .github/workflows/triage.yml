@@ -2,32 +2,27 @@ name: PR triage
 
 # This repository's own caller; consumers start from workflow-templates/triage.yml.
 # Opening, updating, reopening or readying a pull request from a branch in this
-# repository dispatches every mapped workflow on the default branch for its
-# head; a writer's command line such as `/test` runs one again. Runs on a
-# GitHub-hosted runner and never checks out pull-request code.
+# repository makes gizlet-bot comment /ci and /codex-review for its head; the
+# gated workflows start from that comment. Runs on a GitHub-hosted runner and
+# never checks out pull-request code.
 
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
-  issue_comment:
-    types: [created]
 
 permissions:
   contents: read
 
 jobs:
   triage:
-    if: >-
-      github.event_name == 'pull_request_target'
-      || (github.event.issue.pull_request && contains(github.event.comment.body, '/'))
     permissions:
-      actions: write
       contents: read
-      pull-requests: write
+      pull-requests: read
     uses: ./.github/workflows/pr-triage.yml
     with:
-      # One `/command=workflow.yml [workflow.yml ...]` per line. Each workflow
-      # accepts pull_request_number and head_sha dispatch inputs.
       commands: |
-        /test=test.yml
-        /codex-review=pr-review.yml
+        /ci
+        /codex-review
+      client-id: ${{ vars.GIZLET_BOT_CLIENT_ID }}
+    secrets:
+      GIZLET_BOT_PRIVATE_KEY: ${{ secrets.GIZLET_BOT_PRIVATE_KEY }}
