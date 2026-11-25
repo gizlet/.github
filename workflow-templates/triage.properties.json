@@ -1,6 +1,6 @@
 {
   "name": "Gizlet PR triage",
-  "description": "Routes /test and /codex-review comments from writers to the CI and Codex review workflows.",
+  "description": "Starts CI and Codex review when a pull request is opened or updated, and again for /test and /codex-review comments from writers.",
   "categories": [
     "Automation"
   ]
