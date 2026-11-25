@@ -1,15 +1,13 @@
 name: CI
 
-# Pull requests reach this workflow through triage.yml or a writer's `/test`
-# comment. Both run this file from the default branch and report the `CI` check
-# on the pull-request head. Do not add a pull_request trigger: the pull request
+# Pull requests reach this workflow only when triage.yml dispatches it for a
+# writer's `/test` comment. It runs from the default branch and reports the
+# `CI` check on the pull-request head. Do not add a pull_request trigger: the pull request
 # could then rewrite its own required check.
 
 on:
   push:
     branches: [$default-branch]
-  issue_comment:
-    types: [created]
   workflow_dispatch:
     inputs:
       pull_request_number:
@@ -18,7 +16,7 @@ on:
         default: ''
         type: string
       head_sha:
-        description: Expected pull-request head, set by automatic triggers.
+        description: Expected pull-request head, set by triage.
         required: false
         default: ''
         type: string
@@ -28,9 +26,7 @@ permissions:
 
 jobs:
   start:
-    if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '')
-      || (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '/test'))
+    if: github.event_name == 'workflow_dispatch' && inputs.pull_request_number != ''
     permissions:
       checks: write
       contents: read
@@ -48,7 +44,7 @@ jobs:
     if: >-
       !cancelled() && (
         needs.start.outputs.run == 'true'
-        || (needs.start.result == 'skipped' && github.event_name != 'issue_comment'))
+        || needs.start.result == 'skipped')
     # The RUNNERS organization variable maps platforms to self-hosted runners.
     # Use a platform key such as linux-arm64 when the build needs one.
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}').default || 'ubuntu-latest' }}

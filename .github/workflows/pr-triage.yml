@@ -1,0 +1,58 @@
+name: PR triage
+
+# Called from issue_comment. The single entry point for pull-request CI and
+# Codex review: a comment line such as `/test` from a user with write access
+# dispatches the mapped workflows on the default branch with
+# pull_request_number and head_sha inputs, then reacts with 👀. Refused
+# commands get 😕. Nothing runs on push. Never checks out pull-request code.
+
+on:
+  workflow_call:
+    inputs:
+      commands:
+        description: One `/command=workflow.yml [workflow.yml ...]` mapping per line.
+        required: true
+        type: string
+      allow-forks:
+        description: Also accept commands on pull requests from forks.
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      dispatched:
+        description: Comma-separated workflow files that were dispatched.
+        value: ${{ jobs.triage.outputs.dispatched }}
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: write
+    outputs:
+      dispatched: ${{ steps.triage.outputs.dispatched }}
+    steps:
+      - name: Check out the triage implementation
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .pr-command-source
+          sparse-checkout: .github/scripts/pr-command
+          persist-credentials: false
+
+      - name: Authorize and dispatch
+        id: triage
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          COMMANDS: ${{ inputs.commands }}
+          ALLOW_FORKS: ${{ inputs.allow-forks }}
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const { triage } = await import(pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.pr-command-source/.github/scripts/pr-command/triage.mjs`,
+            ).href);
+            await triage({ github, context, core });
