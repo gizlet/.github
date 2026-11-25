@@ -8,7 +8,7 @@ slash-command gating for CI that runs pull-request code).
 | --- | --- |
 | `workflow-templates/` | Callers offered under **Actions → New workflow** ("By gizlet"). |
 | `.github/workflows/codex-review.yml` | Reusable Codex code reviewer, requested with `/codex-review`. |
-| `.github/workflows/pr-triage.yml` | Reusable PR triage: routes `/test` and `/codex-review` comments to the CI and review workflows. |
+| `.github/workflows/pr-triage.yml` | Reusable PR triage: starts the CI and review workflows when a PR is opened or updated, and for `/test` and `/codex-review` comments. |
 | `.github/workflows/pr-check-start.yml` | Reusable: authorizes a dispatch and starts a check on the PR head. |
 | `.github/workflows/pr-check-finish.yml` | Reusable: completes that check from the CI job result. |
 | `.github/workflows/triage.yml`, `pr-review.yml`, `test.yml` | This repository's own callers. |
@@ -90,18 +90,23 @@ repository or adding the Codex review caller to one.
 Repository-specific checks, such as a build, stay in each repository's branch
 protection; the script keeps them when it adds `Codex Code Review`.
 
-## Commands
+## Triggers and commands
 
-Pull-request CI and Codex review run only on request. Opening a PR or pushing
-starts nothing. Post a new PR comment with the command on its own line (not
-quoted and not in a code block); one comment can hold several commands.
+Opening, pushing to, reopening or marking ready a pull request whose branch is
+in the repository starts every workflow mapped in `triage.yml` for its head:
+CI and Codex review. Drafts and fork pull requests start nothing on their own.
+
+To run a workflow again, or for a draft, post a new PR comment with the
+command on its own line (not quoted and not in a code block); one comment can
+hold several commands.
 
 | Command | Effect |
 | --- | --- |
 | `/codex-review` | Codex reviews the diff and reports `Codex Code Review`. |
 | `/test` | Runs the repository's command-gated CI and reports its check. |
 
-`triage.yml` is the only workflow that listens to comments. It calls
+`triage.yml` is the only workflow that listens to pull-request events and
+comments. For a comment it calls
 `pr-triage.yml`, which checks that the commenter has `write`, `maintain`, or
 `admin` permission and that the PR is open and from a branch in the
 repository, then dispatches the workflows mapped to each command on the default
@@ -109,14 +114,14 @@ branch with `pull_request_number` and `head_sha`. Accepted comments receive 👀
 refused ones receive 😕. Edited comments, bot comments, and comments without a
 command are ignored.
 
-Every check is attached to the head commit at the time of the request. After a
-push the new head has no result until a new command runs. A writer can also run
-a workflow manually from the Actions tab with a PR number.
+Every check is attached to the head commit it ran for; a push starts new
+checks for the new head. A writer can also run a workflow manually from the
+Actions tab with a PR number.
 
 ## Codex code review
 
 The reviewer only reviews code. It does not evaluate PR titles, descriptions,
-or linked Issues. Triage dispatches it for `/codex-review`; a writer can also
+or linked Issues. Triage dispatches it on PR updates and for `/codex-review`; a writer can also
 dispatch it manually. A dispatch whose `head_sha` is no longer the PR head is
 skipped.
 

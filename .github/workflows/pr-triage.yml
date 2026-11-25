@@ -1,10 +1,13 @@
 name: PR triage
 
-# Called from issue_comment. The single entry point for pull-request CI and
-# Codex review: a comment line such as `/test` from a user with write access
-# dispatches the mapped workflows on the default branch with
-# pull_request_number and head_sha inputs, then reacts with 👀. Refused
-# commands get 😕. Nothing runs on push. Never checks out pull-request code.
+# The single entry point for pull-request CI and Codex review. It dispatches
+# the mapped workflows on the default branch with pull_request_number and
+# head_sha inputs, and never checks out pull-request code:
+# - From pull_request_target (opened, reopened, synchronize,
+#   ready_for_review): every mapped workflow, when the pull request is open,
+#   not a draft, and its branch is in the repository.
+# - From issue_comment: the workflows of each command line, such as `/test`,
+#   from a user with write access, then reacts with 👀; refused commands get 😕.
 
 on:
   workflow_call:

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseCommandMap, triage } from './triage.mjs';
+import { decideAuto, parseCommandMap, triage } from './triage.mjs';
 import { checkResultFor, finishCheck, startCheck } from './check.mjs';
 import {
   isTrustedPermission, parseCommand, resolvePullRequestCommand, validateCommand,
@@ -206,5 +206,34 @@ test('refuses readers, closed pull requests, and forks', async () => {
   }
   const fork = fakeGithub({ pr: pull({ fork: true }) });
   assert.deepEqual((await run(fork, '/codex-review', { env: { ALLOW_FORKS: 'true' } })).dispatched, ['codex-review.yml']);
-  await assert.rejects(triage({ github: fakeGithub(), core: fakeCore(), env: { COMMANDS }, context: { eventName: 'pull_request_target', repo: REPO, payload: {} } }));
+  await assert.rejects(triage({ github: fakeGithub(), core: fakeCore(), env: { COMMANDS }, context: { eventName: 'push', repo: REPO, payload: {} } }));
+});
+
+const prEvent = (github, action, { head = SHA } = {}) => triage({
+  github, core: fakeCore(), env: { COMMANDS },
+  context: { eventName: 'pull_request_target', repo: REPO, payload: { action, pull_request: { number: 7, head: { sha: head } } } },
+});
+
+test('a pull request update dispatches every mapped workflow', async () => {
+  for (const action of ['opened', 'reopened', 'synchronize', 'ready_for_review']) {
+    const github = fakeGithub();
+    const result = await prEvent(github, action);
+    assert.deepEqual(result.dispatched, ['build.yml', 'codex-review.yml'], action);
+    assert.deepEqual(github.calls, [dispatch('build.yml'), dispatch('codex-review.yml')], action);
+  }
+});
+
+test('drafts, forks, closed pull requests, stale heads and other actions start nothing', async () => {
+  for (const [github, action, options] of [
+    [fakeGithub({ pr: pull({ draft: true }) }), 'synchronize', {}],
+    [fakeGithub({ pr: pull({ fork: true }) }), 'opened', {}],
+    [fakeGithub({ pr: pull({ state: 'closed' }) }), 'synchronize', {}],
+    [fakeGithub(), 'synchronize', { head: 'f'.repeat(40) }],
+    [fakeGithub(), 'edited', {}],
+  ]) {
+    const result = await prEvent(github, action, options);
+    assert.deepEqual(result.dispatched, [], result.reason);
+    assert.equal(github.calls.length, 0, result.reason);
+  }
+  assert.equal(decideAuto({ action: 'labeled', pr: pull(), owner: 'gizlet', repo: 'example', eventHeadSha: SHA }).dispatch, false);
 });

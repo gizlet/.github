@@ -1,12 +1,14 @@
 name: PR triage
 
 # This repository's own caller; consumers start from workflow-templates/triage.yml.
-# A comment line from a user with write access dispatches the mapped
-# workflows on the default branch for the pull request's current head; nothing
-# runs on push. Runs on a GitHub-hosted runner and never checks out
-# pull-request code.
+# Opening, updating, reopening or readying a pull request from a branch in this
+# repository dispatches every mapped workflow on the default branch for its
+# head; a writer's command line such as `/test` runs one again. Runs on a
+# GitHub-hosted runner and never checks out pull-request code.
 
 on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
   issue_comment:
     types: [created]
 
@@ -15,7 +17,9 @@ permissions:
 
 jobs:
   triage:
-    if: github.event.issue.pull_request && contains(github.event.comment.body, '/')
+    if: >-
+      github.event_name == 'pull_request_target'
+      || (github.event.issue.pull_request && contains(github.event.comment.body, '/'))
     permissions:
       actions: write
       contents: read
