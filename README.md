@@ -82,7 +82,7 @@ repository or adding the Codex review caller to one.
 
 | Setting | Where |
 | --- | --- |
-| Squash merging only; commit message is the PR title and description; merged branches are deleted | Repository settings, every non-archived repository |
+| Squash merging only; commit message is the PR title and description; auto-merge allowed; merged branches are deleted | Repository settings, every non-archived repository |
 | Workflows from outside collaborators' PRs need approval | Repository Actions settings, public repositories |
 | Default branch requires `Codex Code Review`; administrators can bypass | Branch protection, public non-fork repositories that call the reviewer (private repositories need a paid plan) |
 | The same, organization-wide | Organization rulesets in `rulesets/`, applied only on a paid plan |
