@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { autoTrigger, decide, parseWorkflows } from './auto-trigger.mjs';
+import { parseCommandMap, triage } from './triage.mjs';
 import { checkResultFor, finishCheck, startCheck } from './check.mjs';
 import {
   isTrustedPermission, parseCommand, resolvePullRequestCommand, validateCommand,
@@ -151,44 +151,60 @@ test('starts and finishes checks', async () => {
   assert.equal(checkResultFor('').title, 'Did not run');
 });
 
-test('validates workflow lists', () => {
-  assert.deepEqual(parseWorkflows(' build.yml, test.yaml,build.yml '), ['build.yml', 'test.yaml']);
-  for (const bad of ['', 'build', '../x.yml', 'a/b.yml']) assert.throws(() => parseWorkflows(bad));
-});
-
-test('decides automatic triggers', () => {
-  const at = (pr) => decide({ pr, ...REPO, eventHeadSha: SHA });
-  assert.equal(at(pull()).dispatch, true);
-  assert.equal(at(pull({ draft: true })).dispatch, false);
-  assert.equal(at(pull({ state: 'closed' })).dispatch, false);
-  assert.equal(at(pull({ head: 'b'.repeat(40) })).dispatch, false);
-  assert.deepEqual(at(pull({ fork: true })).fork, true);
-  assert.equal(at({ ...pull(), head: { sha: SHA, repo: null } }).fork, true);
-});
-
-const targetContext = (action) => ({
-  eventName: 'pull_request_target', repo: REPO,
-  payload: { action, pull_request: { number: 7, head: { sha: SHA } } },
-});
-const env = { WORKFLOWS: 'build.yml,lint.yml', COMMAND: '/test' };
-
-test('dispatches workflows for same-repository pull requests', async () => {
-  const github = fakeGithub();
-  const result = await autoTrigger({ github, context: targetContext('synchronize'), core: fakeCore(), env });
-  assert.equal(result.dispatch, true);
-  assert.deepEqual(github.calls, [
-    ['dispatch', 'build.yml', 'main', { pull_request_number: '7', head_sha: SHA }],
-    ['dispatch', 'lint.yml', 'main', { pull_request_number: '7', head_sha: SHA }],
+test('parses command mappings', () => {
+  assert.deepEqual(parseCommandMap('/test=build.yml\n /codex-review = codex-review.yml\n'), [
+    { command: '/test', workflows: ['build.yml'] },
+    { command: '/codex-review', workflows: ['codex-review.yml'] },
   ]);
+  assert.deepEqual(parseCommandMap('/test=ci.yml release.yml ci.yml'), [{ command: '/test', workflows: ['ci.yml', 'release.yml'] }]);
+  for (const bad of ['', 'test=ci.yml', '/test', '/test=../x.yml', '/test=a/b.yml', '/test=a.yml\n/TEST=b.yml']) {
+    assert.throws(() => parseCommandMap(bad), bad);
+  }
 });
 
-test('posts a single notice for fork pull requests', async () => {
-  const opened = fakeGithub({ pr: pull({ fork: true }) });
-  await autoTrigger({ github: opened, context: targetContext('opened'), core: fakeCore(), env });
-  assert.deepEqual(opened.calls.map((call) => call[0]), ['comment']);
-  assert.match(opened.calls[0][1], /forks/);
-  const pushed = fakeGithub({ pr: pull({ fork: true }) });
-  await autoTrigger({ github: pushed, context: targetContext('synchronize'), core: fakeCore(), env });
-  assert.deepEqual(pushed.calls, []);
-  await assert.rejects(autoTrigger({ github: fakeGithub(), context: { ...targetContext('opened'), eventName: 'pull_request' }, core: fakeCore(), env }));
+const COMMANDS = '/test=build.yml\n/codex-review=codex-review.yml';
+const run = (github, body, { type = 'User', action = 'created', onPr = true, env = {} } = {}) => triage({
+  github, core: fakeCore(), env: { COMMANDS, ...env },
+  context: {
+    eventName: 'issue_comment', repo: REPO,
+    payload: { action, issue: { number: 7, ...(onPr ? { pull_request: {} } : {}) }, comment: { id: 99, body, user: { login: 'alice', type } } },
+  },
+});
+const dispatch = (workflow) => ['dispatch', workflow, 'main', { pull_request_number: '7', head_sha: SHA }];
+
+test('dispatches the workflows of each command in the comment', async () => {
+  const github = fakeGithub();
+  const result = await run(github, '/test');
+  assert.deepEqual(result.dispatched, ['build.yml']);
+  assert.deepEqual(github.calls, [['permission', 'alice'], dispatch('build.yml'), ['reaction', 'eyes']]);
+  const both = fakeGithub();
+  await run(both, 'Ready.\n/codex-review\n/test');
+  assert.deepEqual(both.calls.filter((call) => call[0] === 'dispatch'), [dispatch('build.yml'), dispatch('codex-review.yml')]);
+});
+
+test('ignores comments without a command', async () => {
+  for (const [body, options] of [
+    ['looks good', {}], ['please /test', {}], ['`/test`', {}], ['> /test', {}],
+    ['/test', { type: 'Bot' }], ['/test', { action: 'edited' }], ['/test', { onPr: false }],
+  ]) {
+    const github = fakeGithub();
+    const result = await run(github, body, options);
+    assert.deepEqual(result.dispatched, [], body);
+    assert.deepEqual(github.calls, [], body);
+  }
+});
+
+test('refuses readers, closed pull requests, and forks', async () => {
+  for (const github of [
+    fakeGithub({ permission: 'read' }), fakeGithub({ missingUser: true }),
+    fakeGithub({ pr: pull({ state: 'closed' }) }), fakeGithub({ pr: pull({ fork: true }) }),
+  ]) {
+    const result = await run(github, '/test');
+    assert.equal(result.refused, true, result.reason);
+    assert.equal(github.calls.some((call) => call[0] === 'dispatch'), false);
+    assert.deepEqual(github.calls.at(-1), ['reaction', 'confused']);
+  }
+  const fork = fakeGithub({ pr: pull({ fork: true }) });
+  assert.deepEqual((await run(fork, '/codex-review', { env: { ALLOW_FORKS: 'true' } })).dispatched, ['codex-review.yml']);
+  await assert.rejects(triage({ github: fakeGithub(), core: fakeCore(), env: { COMMANDS }, context: { eventName: 'pull_request_target', repo: REPO, payload: {} } }));
 });
