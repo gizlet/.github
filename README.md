@@ -10,6 +10,7 @@ slash-command gating for CI that runs pull-request code).
 | `.github/workflows/codex-review.yml` | Reusable Codex code reviewer, requested with `/codex-review`. |
 | `.github/workflows/pr-triage.yml` | Reusable PR triage: routes `/test` and `/codex-review` comments to the CI and review workflows. |
 | `.github/workflows/pr-check-start.yml` | Reusable: authorizes a dispatch and starts a check on the PR head. |
+| `.github/workflows/pr-auto-trigger.yml` | Deprecated no-op for callers of the former push-based triage. |
 | `.github/workflows/pr-check-finish.yml` | Reusable: completes that check from the CI job result. |
 | `.github/workflows/triage.yml`, `pr-review.yml`, `test.yml` | This repository's own callers. |
 | `.github/scripts/` | Implementation and unit tests. |
