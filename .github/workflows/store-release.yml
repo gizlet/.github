@@ -15,19 +15,71 @@ defaults:
     shell: bash
 
 jobs:
+  verify:
+    name: Check app version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      commit: ${{ steps.version.outputs.commit }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.sha }}
+          path: current
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        if: >-
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
+          && github.event.before != '0000000000000000000000000000000000000000'
+        with:
+          ref: ${{ github.event.before }}
+          path: previous
+          persist-credentials: false
+      - name: Resolve release tag
+        id: version
+        run: |
+          case "$GITHUB_EVENT_NAME:$GITHUB_REF" in
+            push:refs/heads/main|*:refs/tags/*) ;;
+            *) exit 0 ;;
+          esac
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import tomllib
+
+          version = tomllib.loads(Path("current/gizlet.toml").read_text(encoding="utf-8"))["version"]
+          if not isinstance(version, str) or not re.fullmatch(r"[0-9][0-9A-Za-z.+-]{0,63}", version):
+              raise SystemExit(f"Invalid Gizlet Store version {version!r}.")
+          tag = f"v{version}"
+          if os.environ["GITHUB_REF_TYPE"] == "tag":
+              if os.environ["GITHUB_REF_NAME"] != tag:
+                  raise SystemExit(f"Expected {tag} for this version, got {os.environ['GITHUB_REF_NAME']}.")
+          else:
+              previous = Path("previous/gizlet.toml")
+              if previous.is_file() and tomllib.loads(previous.read_text(encoding="utf-8")).get("version") == version:
+                  print(f"Version {version} is unchanged.")
+                  raise SystemExit(0)
+          commit = subprocess.check_output(["git", "-C", "current", "rev-parse", "HEAD"], text=True).strip()
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as outputs:
+              print(f"tag={tag}", f"commit={commit}", sep="\n", file=outputs)
+          PY
+
   release:
     name: Publish GitHub Release
+    needs: verify
+    if: needs.verify.outputs.tag != ''
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}')['default'] || 'ubuntu-24.04' }}
     timeout-minutes: 15
+    concurrency:
+      group: store-release-upload-${{ needs.verify.outputs.tag }}
     permissions:
       contents: write
     steps:
-      - name: Verify release tag
-        run: |
-          if [[ "$GITHUB_REF_TYPE" != tag || ! "$GITHUB_REF_NAME" =~ ^v[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$ ]]; then
-            echo '::error::Run this workflow on a tag named v<version>.'
-            exit 1
-          fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: ${{ inputs.artifact-name }}
@@ -36,6 +88,8 @@ jobs:
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.verify.outputs.commit }}
         run: |
           shopt -s nullglob
           packages=("$RUNNER_TEMP"/gizlet-release-packages/*.gzl)
@@ -44,8 +98,23 @@ jobs:
             exit 1
           fi
 
-          if ! release=$(gh release view "$GITHUB_REF_NAME" --json isDraft,isPrerelease,assets); then
-            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --draft
+          tag_commit_endpoint="repos/$GH_REPO/commits/refs%2Ftags%2F$RELEASE_TAG"
+          if ! tagged_commit=$(gh api "$tag_commit_endpoint" --jq .sha 2>/dev/null); then
+            if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+              echo "::error::Could not resolve existing tag $RELEASE_TAG."
+              exit 1
+            fi
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$RELEASE_COMMIT" --silent
+            tagged_commit=$(gh api "$tag_commit_endpoint" --jq .sha)
+          fi
+          if [[ "$tagged_commit" != "$RELEASE_COMMIT" ]]; then
+            echo "::error::Tag $RELEASE_TAG points to $tagged_commit. Expected $RELEASE_COMMIT."
+            exit 1
+          fi
+
+          if ! release=$(gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,assets); then
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes --draft
             release='{"isDraft":true,"isPrerelease":false}'
           fi
           if jq -e '.isPrerelease' <<< "$release" >/dev/null; then
@@ -53,8 +122,8 @@ jobs:
             exit 1
           fi
           if jq -e '.isDraft' <<< "$release" >/dev/null; then
-            gh release upload "$GITHUB_REF_NAME" "${packages[@]}" --clobber
-            gh release edit "$GITHUB_REF_NAME" --draft=false
+            gh release upload "$RELEASE_TAG" "${packages[@]}" --clobber
+            gh release edit "$RELEASE_TAG" --draft=false
           else
             for package in "${packages[@]}"; do
               if ! jq -e --arg name "${package##*/}" \
@@ -67,21 +136,24 @@ jobs:
 
   publish:
     name: Index and verify on Gizlet Store
-    needs: release
+    needs: [verify, release]
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}')['default'] || 'ubuntu-24.04' }}
     timeout-minutes: 12
+    concurrency:
+      group: store-release-index-${{ needs.verify.outputs.tag }}
     permissions:
       id-token: write
     steps:
       - name: Index the release and wait for checks
         env:
           STORE_API: https://api.gizlet.io
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
         run: |
           oidc_token=$(curl --fail --silent --show-error --max-time 20 \
             -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             --get --data-urlencode "audience=$STORE_API" "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -er '.value')
           echo "::add-mask::$oidc_token"
-          body=$(jq -cn --arg tag "$GITHUB_REF_NAME" '{tag: $tag}')
+          body=$(jq -cn --arg tag "$RELEASE_TAG" '{tag: $tag}')
           if ! response=$(curl --fail-with-body --silent --show-error --max-time 60 \
             -H "Authorization: Bearer $oidc_token" -H 'Content-Type: application/json' \
             --data "$body" "$STORE_API/v1/publish"); then
@@ -99,7 +171,7 @@ jobs:
               case "$status" in
                 ready)
                   jq -r '"Visibility: \(.visibility)", (.warnings[]? | "Warning: \(.)")' <<< "$response"
-                  printf 'Gizlet Store: [%s](%s)\n' "$GITHUB_REF_NAME" "$share_url" >> "$GITHUB_STEP_SUMMARY"
+                  printf 'Gizlet Store: [%s](%s)\n' "$RELEASE_TAG" "$share_url" >> "$GITHUB_STEP_SUMMARY"
                   exit 0
                   ;;
                 failed)

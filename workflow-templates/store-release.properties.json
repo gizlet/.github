@@ -1,6 +1,6 @@
 {
   "name": "Release to Gizlet Store",
-  "description": "Build .gzl packages on version tags, publish a GitHub Release, and index it in Gizlet Store.",
+  "description": "Build .gzl packages and publish to Gizlet Store when the version changes on main or a version tag is pushed.",
   "iconName": "gizlet",
   "categories": [
     "Deployment"

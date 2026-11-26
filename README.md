@@ -206,20 +206,24 @@ run the job directly and may save caches; PR builds should only restore them.
 ## Releasing to Gizlet Store
 
 Choose **Release to Gizlet Store** under **Actions → New workflow**. Replace
-the package step with the repository's test and build commands. Verify the tag
-is `v<version>` for the version in the tagged `gizlet.toml`, and upload the
+the package step with the repository's test and build commands. Upload the
 packages as a same-run artifact with the `.gzl` files at its root. The default
 artifact name is `gizlet-packages`. The
 [package format](https://github.com/gizlet/gizlet/blob/main/docs/gizlet-toml.md)
 defines the release asset names and the package contents.
 
-Push the version tag or select it when dispatching the workflow. The reusable
-workflow publishes the GitHub Release after uploading the packages, submits the
-tag to `POST https://api.gizlet.io/v1/publish` using GitHub Actions OIDC, and
-waits for the Store checks. A `ready` release is installable by link. Store
-warnings, including a missing icon, can leave it unlisted. For a published
-release with the expected assets, a rerun can retry Store indexing without
-replacing the assets.
+Change `version` in `gizlet.toml` and merge to `main`. After CI passes, the
+workflow compares the version before and after the push. An unchanged version
+skips publishing. For a new version it creates `v<version>` at the built commit.
+You can also push a matching tag or select it when dispatching the workflow.
+
+The reusable workflow uploads the packages to a GitHub Release, publishes it,
+then submits the tag to `POST https://api.gizlet.io/v1/publish` using GitHub
+Actions OIDC and waits for the Store checks. A `ready` release is installable by
+link. Store warnings, including a missing icon, can leave it unlisted. For a published
+release with the expected assets, rerunning the original workflow can retry
+Store indexing. A rerun reuses the tag if it points to the built commit. If the
+tag points elsewhere, the workflow fails.
 
 Grant the caller job `contents: write` and `id-token: write`. A custom
 `RUNNERS.default` needs Bash, `gh`, `curl`, and `jq`. Private
