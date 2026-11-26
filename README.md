@@ -225,8 +225,8 @@ release with the expected assets, rerunning the original workflow can retry
 Store indexing. A rerun reuses the tag if it points to the built commit. If the
 tag points elsewhere, the workflow fails.
 
-Grant the caller job `contents: write` and `id-token: write`. A custom
-`RUNNERS.default` needs Bash, `gh`, `curl`, and `jq`. Private
+Grant the caller job `contents: write` and `id-token: write`. The reusable
+workflow uses GitHub-hosted runners with `gh`, `curl`, and `jq`. Private
 repositories also need the [gizlet-bot GitHub App](https://github.com/apps/gizlet-bot)
 installed so the Store can read the release. Indexed private releases are
 distributed through the Store.

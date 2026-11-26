@@ -73,7 +73,7 @@ jobs:
     name: Publish GitHub Release
     needs: verify
     if: needs.verify.outputs.tag != ''
-    runs-on: ${{ fromJSON(vars.RUNNERS || '{}')['default'] || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     concurrency:
       group: store-release-upload-${{ needs.verify.outputs.tag }}
@@ -137,7 +137,7 @@ jobs:
   publish:
     name: Index and verify on Gizlet Store
     needs: [verify, release]
-    runs-on: ${{ fromJSON(vars.RUNNERS || '{}')['default'] || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     concurrency:
       group: store-release-index-${{ needs.verify.outputs.tag }}
