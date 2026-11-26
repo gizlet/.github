@@ -1,0 +1,8 @@
+{
+  "name": "Release to Gizlet Store",
+  "description": "Build .gzl packages on version tags, publish a GitHub Release, and index it in Gizlet Store.",
+  "iconName": "gizlet",
+  "categories": [
+    "Deployment"
+  ]
+}
