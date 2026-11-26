@@ -11,6 +11,7 @@ slash-command gating for CI that runs pull-request code).
 | `.github/workflows/pr-triage.yml` | Reusable PR triage: when a PR is opened or updated, gizlet-bot comments `/ci` and `/codex-review`, which starts CI and review. |
 | `.github/workflows/pr-check-start.yml` | Reusable: authorizes a command comment (or a writer's dispatch) and starts a check on the PR head. |
 | `.github/workflows/pr-check-finish.yml` | Reusable: completes that check from the CI job result. |
+| `.github/workflows/store-release.yml` | Reusable release publishing and Gizlet Store indexing for `.gzl` packages. |
 | `.github/workflows/triage.yml`, `pr-review.yml`, `test.yml` | This repository's own callers. |
 | `.github/scripts/` | Implementation and unit tests. |
 | `assets/gizlet-bot.png` | gizlet-bot's avatar. |
@@ -201,6 +202,30 @@ Gated workflows have no `pull_request` trigger. Comment and dispatch events
 always run the workflow file from the default branch, so a PR cannot weaken its
 own required check by editing the workflow. Push builds of the default branch
 run the job directly and may save caches; PR builds should only restore them.
+
+## Releasing to Gizlet Store
+
+Choose **Release to Gizlet Store** under **Actions → New workflow**. Replace
+the package step with the repository's test and build commands. Verify the tag
+is `v<version>` for the version in the tagged `gizlet.toml`, and upload the
+packages as a same-run artifact with the `.gzl` files at its root. The default
+artifact name is `gizlet-packages`. The
+[package format](https://github.com/gizlet/gizlet/blob/main/docs/gizlet-toml.md)
+defines the release asset names and the package contents.
+
+Push the version tag or select it when dispatching the workflow. The reusable
+workflow publishes the GitHub Release after uploading the packages, submits the
+tag to `POST https://api.gizlet.io/v1/publish` using GitHub Actions OIDC, and
+waits for the Store checks. A `ready` release is installable by link. Store
+warnings, including a missing icon, can leave it unlisted. For a published
+release with the expected assets, a rerun can retry Store indexing without
+replacing the assets.
+
+Grant the caller job `contents: write` and `id-token: write`. A custom
+`RUNNERS.default` needs Bash, `gh`, `curl`, and `jq`. Private
+repositories also need the [gizlet-bot GitHub App](https://github.com/apps/gizlet-bot)
+installed so the Store can read the release. Indexed private releases are
+distributed through the Store.
 
 ## Development
 
