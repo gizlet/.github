@@ -1,6 +1,7 @@
 {
   "name": "Gizlet Codex review",
   "description": "Codex code review dispatched by triage for /codex-review; reports the Codex Code Review check.",
+  "iconName": "gizlet",
   "categories": [
     "Automation"
   ]

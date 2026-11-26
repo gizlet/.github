@@ -1,6 +1,7 @@
 {
   "name": "Gizlet gated CI",
   "description": "Build and test for /ci comments from gizlet-bot or writers; reports the CI check on the pull-request head.",
+  "iconName": "gizlet",
   "categories": [
     "Automation"
   ]

@@ -1,6 +1,7 @@
 {
   "name": "Gizlet PR triage",
   "description": "Comments /ci and /codex-review as gizlet-bot when a pull request is opened or updated, which starts CI and Codex review.",
+  "iconName": "gizlet",
   "categories": [
     "Automation"
   ]

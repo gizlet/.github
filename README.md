@@ -6,7 +6,7 @@ slash-command gating for CI that runs pull-request code).
 
 | Path | Role |
 | --- | --- |
-| `workflow-templates/` | Callers offered under **Actions → New workflow** ("By gizlet"). |
+| `workflow-templates/` | Callers offered under **Actions → New workflow** ("By gizlet"), with the Gizlet icon (`gizlet.svg`, a copy of `design/icon/mark.svg` in gizlet/gizlet). |
 | `.github/workflows/codex-review.yml` | Reusable Codex code reviewer, requested with `/codex-review`. |
 | `.github/workflows/pr-triage.yml` | Reusable PR triage: when a PR is opened or updated, gizlet-bot comments `/ci` and `/codex-review`, which starts CI and review. |
 | `.github/workflows/pr-check-start.yml` | Reusable: authorizes a command comment (or a writer's dispatch) and starts a check on the PR head. |
