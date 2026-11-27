@@ -218,7 +218,7 @@ skips publishing. For a new version it creates `v<version>` at the built commit.
 You can also push a matching tag or select it when dispatching the workflow.
 
 The reusable workflow uploads the packages to a GitHub Release, publishes it,
-then submits the tag to `POST https://api.gizlet.io/v1/publish` using GitHub
+then submits the tag to `POST https://gizlet.io/api/v1/publish` using GitHub
 Actions OIDC and waits for the Store checks. A `ready` release is installable by
 link. Store warnings, including a missing icon, can leave it unlisted. For a published
 release with the expected assets, rerunning the original workflow can retry
