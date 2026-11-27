@@ -146,7 +146,7 @@ jobs:
     steps:
       - name: Index the release and wait for checks
         env:
-          STORE_API: https://api.gizlet.io
+          STORE_API: https://gizlet.io/api
           RELEASE_TAG: ${{ needs.verify.outputs.tag }}
         run: |
           oidc_token=$(curl --fail --silent --show-error --max-time 20 \
